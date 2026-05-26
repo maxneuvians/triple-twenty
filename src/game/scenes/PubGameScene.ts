@@ -105,6 +105,7 @@ export class PubGameScene extends Phaser.Scene {
   private actionButton!: PixelButton;
   private discardButton!: PixelButton;
   private newGameButton!: PixelButton;
+  private hoveredTarget?: Target;
   private waitingForPlayerDrift = false;
   private cpuRunning = false;
   private logScrollOffset = 0;
@@ -166,6 +167,14 @@ export class PubGameScene extends Phaser.Scene {
       this.state = declareTarget(this.state, target);
       this.refresh();
     });
+    zone.on("pointermove", (pointer: Phaser.Input.Pointer) => {
+      if (!this.canChooseTarget()) {
+        this.setHoveredTarget(undefined);
+        return;
+      }
+      this.setHoveredTarget(this.targetFromPoint(pointer.x, pointer.y));
+    });
+    zone.on("pointerout", () => this.setHoveredTarget(undefined));
   }
 
   private drawBoard(highlight: Target | undefined) {
@@ -212,16 +221,16 @@ export class PubGameScene extends Phaser.Scene {
       g.lineStyle(1, 0x101010, 0.9);
       g.lineBetween(innerX, innerY, outerX, outerY);
     }
-    this.drawTargetHighlight(g, highlight);
+    this.drawTargetHighlight(g, highlight, 0xffd166, 0.22, 4);
+    if (this.hoveredTarget && !this.targetsMatch(this.hoveredTarget, highlight)) {
+      this.drawTargetHighlight(g, this.hoveredTarget, 0x9be2c1, 0.18, 3);
+    }
   }
 
-  private drawAnnularSegment(
-    g: Phaser.GameObjects.Graphics,
+  private annularSegmentPoints(
     innerRadius: number,
     outerRadius: number,
-    centerAngleDegrees: number,
-    color: number,
-    alpha = 1
+    centerAngleDegrees: number
   ) {
     const start = Phaser.Math.DegToRad(centerAngleDegrees - halfSegment);
     const end = Phaser.Math.DegToRad(centerAngleDegrees + halfSegment);
@@ -241,39 +250,66 @@ export class PubGameScene extends Phaser.Scene {
         y: boardCenter.y + Math.sin(angle) * innerRadius
       });
     }
+    return points;
+  }
+
+  private drawAnnularSegment(
+    g: Phaser.GameObjects.Graphics,
+    innerRadius: number,
+    outerRadius: number,
+    centerAngleDegrees: number,
+    color: number,
+    alpha = 1
+  ) {
+    const points = this.annularSegmentPoints(innerRadius, outerRadius, centerAngleDegrees);
     g.fillStyle(color, alpha);
     g.fillPoints(points, true, true);
   }
 
-  private drawTargetHighlight(g: Phaser.GameObjects.Graphics, highlight: Target | undefined) {
+  private strokeAnnularSegment(
+    g: Phaser.GameObjects.Graphics,
+    innerRadius: number,
+    outerRadius: number,
+    centerAngleDegrees: number,
+    color: number,
+    alpha: number,
+    width: number
+  ) {
+    g.lineStyle(width, color, alpha);
+    g.strokePoints(this.annularSegmentPoints(innerRadius, outerRadius, centerAngleDegrees), true, true);
+  }
+
+  private drawTargetHighlight(
+    g: Phaser.GameObjects.Graphics,
+    highlight: Target | undefined,
+    color: number,
+    fillAlpha: number,
+    lineWidth: number
+  ) {
     if (highlight) {
-      g.lineStyle(4, 0xffd166, 1);
+      g.lineStyle(lineWidth, color, 1);
       if (highlight.ring === "bull") {
-        g.fillStyle(0xffd166, 0.18);
+        g.fillStyle(color, fillAlpha);
         g.fillCircle(boardCenter.x, boardCenter.y, boardRings.bull);
         g.strokeCircle(boardCenter.x, boardCenter.y, boardRings.bull);
       } else if (highlight.ring === "outerBull") {
+        this.drawCircularRing(g, boardRings.bull, boardRings.outerBull, color, fillAlpha);
+        g.strokeCircle(boardCenter.x, boardCenter.y, boardRings.bull);
         g.strokeCircle(boardCenter.x, boardCenter.y, boardRings.outerBull);
       } else {
         const index = dartboardOrder.indexOf(highlight.number);
         const centerAngle = index * segmentSpan - 90;
         if (highlight.ring === "double") {
-          this.drawAnnularSegment(g, boardRings.outerSingle, boardRings.doubleOuter, centerAngle, 0xffd166, 0.22);
+          this.drawAnnularSegment(g, boardRings.outerSingle, boardRings.doubleOuter, centerAngle, color, fillAlpha);
+          this.strokeAnnularSegment(g, boardRings.outerSingle, boardRings.doubleOuter, centerAngle, color, 1, lineWidth);
         } else if (highlight.ring === "treble") {
-          this.drawAnnularSegment(g, boardRings.innerSingle, boardRings.trebleOuter, centerAngle, 0xffd166, 0.22);
+          this.drawAnnularSegment(g, boardRings.innerSingle, boardRings.trebleOuter, centerAngle, color, fillAlpha);
+          this.strokeAnnularSegment(g, boardRings.innerSingle, boardRings.trebleOuter, centerAngle, color, 1, lineWidth);
         } else {
-          this.drawAnnularSegment(g, boardRings.outerBull, boardRings.innerSingle, centerAngle, 0xffd166, 0.16);
-          this.drawAnnularSegment(g, boardRings.trebleOuter, boardRings.outerSingle, centerAngle, 0xffd166, 0.16);
-        }
-        const boundaryA = Phaser.Math.DegToRad(centerAngle - halfSegment);
-        const boundaryB = Phaser.Math.DegToRad(centerAngle + halfSegment);
-        for (const angle of [boundaryA, boundaryB]) {
-          g.lineBetween(
-            boardCenter.x + Math.cos(angle) * boardRings.outerBull,
-            boardCenter.y + Math.sin(angle) * boardRings.outerBull,
-            boardCenter.x + Math.cos(angle) * boardRings.doubleOuter,
-            boardCenter.y + Math.sin(angle) * boardRings.doubleOuter
-          );
+          this.drawAnnularSegment(g, boardRings.outerBull, boardRings.innerSingle, centerAngle, color, fillAlpha * 0.8);
+          this.drawAnnularSegment(g, boardRings.trebleOuter, boardRings.outerSingle, centerAngle, color, fillAlpha * 0.8);
+          this.strokeAnnularSegment(g, boardRings.outerBull, boardRings.innerSingle, centerAngle, color, 0.95, lineWidth);
+          this.strokeAnnularSegment(g, boardRings.trebleOuter, boardRings.outerSingle, centerAngle, color, 0.95, lineWidth);
         }
       }
     }
@@ -396,6 +432,27 @@ export class PubGameScene extends Phaser.Scene {
     return { ring: "single", number };
   }
 
+  private canChooseTarget(): boolean {
+    return (
+      this.state.activePlayerId === "player" &&
+      (this.state.phase === "declare-target" || this.state.phase === "play-outcome") &&
+      !this.cpuRunning
+    );
+  }
+
+  private setHoveredTarget(target: Target | undefined) {
+    if (this.targetsMatch(this.hoveredTarget, target)) return;
+    this.hoveredTarget = target;
+    this.drawBoard(this.state.pendingDart?.target);
+  }
+
+  private targetsMatch(a: Target | undefined, b: Target | undefined): boolean {
+    if (!a || !b) return a === b;
+    if (a.ring !== b.ring) return false;
+    if (a.ring === "bull" || a.ring === "outerBull") return true;
+    return b.ring !== "bull" && b.ring !== "outerBull" && a.number === b.number;
+  }
+
   private createUiShell() {
     this.playerScoreText = this.addText(36, 64, "", 60, "#e7bd54", true, 166, 72).setShadow(3, 3, "#000000", 0, false, true);
     this.playerMetaText = this.addText(36, 34, "PLAYER", 20, "#ff604a", true, 166, 22);
@@ -512,13 +569,16 @@ export class PubGameScene extends Phaser.Scene {
   }
 
   private refresh() {
+    if (!this.canChooseTarget()) {
+      this.hoveredTarget = undefined;
+    }
     this.drawBoard(this.state.pendingDart?.target);
     const player = this.state.players.player;
     const cpu = this.state.players.cpu;
     this.playerScoreText.setText(String(player.score));
     this.cpuScoreText.setText(String(cpu.score));
     this.playerMetaText.setText("PLAYER");
-    this.cpuMetaText.setText("CPU OPPONENT");
+    this.cpuMetaText.setText("CPU");
     this.checkoutText.setText(`CHECKOUT\n${this.checkoutSuggestion(player.score)}`);
     this.visitText.setText(
       `VISIT\n${this.state.players[this.state.activePlayerId].dartsThrown + 1}/3`
