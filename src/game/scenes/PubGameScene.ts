@@ -31,7 +31,7 @@ type PixelButton = {
 
 type VisitSlot = {
   frame: Phaser.GameObjects.Rectangle;
-  dart: Phaser.GameObjects.Text;
+  dart: Phaser.GameObjects.Graphics;
 };
 
 type CardColors = {
@@ -63,17 +63,19 @@ const cardTextColors: Record<CardName, CardColors> = {
   "Checkout Nerve": { label: "#1a1010", body: "#111510" }
 };
 
-const boardCenter = { x: 418, y: 250 };
-const boardRadius = 172;
+const boardCenter = { x: 470, y: 200 };
+const boardRadius = 138;
+const boardBackboardRadius = 162;
+const boardLabelRadius = 152;
 const segmentSpan = 18;
 const halfSegment = segmentSpan / 2;
 const boardRings = {
-  bull: 16,
-  outerBull: 35,
-  innerSingle: 81,
-  trebleOuter: 101,
-  outerSingle: 154,
-  doubleOuter: 172
+  bull: 13,
+  outerBull: 28,
+  innerSingle: 65,
+  trebleOuter: 81,
+  outerSingle: 123,
+  doubleOuter: 138
 };
 
 export class PubGameScene extends Phaser.Scene {
@@ -149,7 +151,7 @@ export class PubGameScene extends Phaser.Scene {
     this.hitFlash.setBlendMode(Phaser.BlendModes.ADD);
     this.createBoardLabels();
 
-    const zone = this.add.zone(boardCenter.x, boardCenter.y, boardRadius * 2, boardRadius * 2);
+    const zone = this.add.zone(boardCenter.x, boardCenter.y, boardBackboardRadius * 2, boardBackboardRadius * 2);
     zone.setInteractive({ cursor: "crosshair" });
     zone.on("pointerdown", (pointer: Phaser.Input.Pointer) => {
       if (
@@ -170,9 +172,11 @@ export class PubGameScene extends Phaser.Scene {
     const g = this.board;
     g.clear();
     g.fillStyle(0x151515, 1);
-    g.fillCircle(boardCenter.x, boardCenter.y, boardRadius + 16);
+    g.fillCircle(boardCenter.x, boardCenter.y, boardBackboardRadius);
     g.lineStyle(5, 0xcab27a, 1);
-    g.strokeCircle(boardCenter.x, boardCenter.y, boardRadius + 16);
+    g.strokeCircle(boardCenter.x, boardCenter.y, boardBackboardRadius);
+    g.lineStyle(1, 0x4c3822, 0.75);
+    g.strokeCircle(boardCenter.x, boardCenter.y, boardLabelRadius - 13);
 
     for (let index = 0; index < dartboardOrder.length; index += 1) {
       const centerAngle = index * segmentSpan - 90;
@@ -361,12 +365,12 @@ export class PubGameScene extends Phaser.Scene {
     for (const label of this.boardLabels) label.destroy();
     this.boardLabels = dartboardOrder.map((number, index) => {
       const angle = Phaser.Math.DegToRad(index * 18 - 90);
-      const x = boardCenter.x + Math.cos(angle) * (boardRadius + 17);
-      const y = boardCenter.y + Math.sin(angle) * (boardRadius + 17);
+      const x = boardCenter.x + Math.cos(angle) * boardLabelRadius;
+      const y = boardCenter.y + Math.sin(angle) * boardLabelRadius;
       return this.add
         .text(x, y, String(number), {
           fontFamily: "Courier New",
-          fontSize: "17px",
+          fontSize: "16px",
           color: "#f7e2b3",
           fontStyle: "bold"
         })
@@ -399,8 +403,8 @@ export class PubGameScene extends Phaser.Scene {
     this.checkoutText = this.addText(36, 184, "", 18, "#f2d18a", true, 166, 40);
     this.addText(52, 288, "BULL\nFINISH\nSTRONG", 17, "#b8c45c", true, 118, 54);
 
-    this.centerSignText = this.addText(652, 76, "301\nBEST OF\n5 LEGS", 24, "#e7bd54", true, 92, 112);
-    this.addText(652, 50, "TONIGHT", 14, "#70b765", true, 92, 18);
+    this.centerSignText = this.addText(692, 76, "301\nBEST OF\n5 LEGS", 24, "#e7bd54", true, 92, 112);
+    this.addText(692, 50, "TONIGHT", 14, "#70b765", true, 92, 18);
 
     this.add.image(1029, 86, "cpu-opponent").setDisplaySize(98, 98).setDepth(5);
     this.cpuScoreText = this.addText(1112, 64, "", 54, "#e7bd54", true, 120, 66).setShadow(3, 3, "#000000", 0, false, true);
@@ -410,7 +414,8 @@ export class PubGameScene extends Phaser.Scene {
     this.visitText = this.addText(1014, 188, "", 20, "#e8c176", true, 92, 50);
     this.visitSlots = [0, 1, 2].map((index) => {
       const frame = this.add.rectangle(1120 + index * 42, 226, 34, 54, 0x111515, 0.9).setStrokeStyle(2, 0x6b6555).setDepth(6);
-      const dart = this.addText(1113 + index * 42, 206, "|>", 28, "#f2d18a", true, 28, 42);
+      const dart = this.add.graphics().setDepth(7);
+      this.drawVisitDart(dart, 1120 + index * 42, 226, 0xf2d18a, 1);
       return { frame, dart };
     });
 
@@ -434,9 +439,24 @@ export class PubGameScene extends Phaser.Scene {
         }
       }
     );
-    this.actionButton = this.makeButton(682, 673, 182, 34, "THROW DART", () => this.primaryAction());
-    this.discardButton = this.makeButton(874, 673, 84, 34, "DISCARD", () => this.discardTechniques());
-    this.newGameButton = this.makeButton(1020, 673, 206, 34, "NEW LEG", () => this.newGame());
+    this.actionButton = this.makeButton(684, 674, 174, 30, "THROW DART", () => this.primaryAction());
+    this.discardButton = this.makeButton(1004, 674, 102, 30, "DISCARD", () => this.discardTechniques());
+    this.newGameButton = this.makeButton(1120, 674, 124, 30, "NEW LEG", () => this.newGame());
+  }
+
+  private drawVisitDart(g: Phaser.GameObjects.Graphics, x: number, y: number, color: number, alpha: number) {
+    g.clear();
+    g.lineStyle(3, color, alpha);
+    g.lineBetween(x, y - 12, x, y + 16);
+    g.lineStyle(2, 0x0b0c0c, alpha * 0.8);
+    g.lineBetween(x + 3, y - 10, x + 3, y + 14);
+    g.fillStyle(color, alpha);
+    g.fillTriangle(x - 5, y + 15, x + 5, y + 15, x, y + 24);
+    g.fillTriangle(x - 12, y - 18, x - 2, y - 13, x - 2, y - 4);
+    g.fillTriangle(x + 12, y - 18, x + 2, y - 13, x + 2, y - 4);
+    g.fillStyle(0x0b0c0c, alpha * 0.7);
+    g.fillTriangle(x - 8, y - 15, x - 2, y - 12, x - 2, y - 7);
+    g.fillTriangle(x + 8, y - 15, x + 2, y - 12, x + 2, y - 7);
   }
 
   private addText(x: number, y: number, text: string, size: number, color: string, bold = false, width?: number, height?: number) {
@@ -458,7 +478,7 @@ export class PubGameScene extends Phaser.Scene {
     const title = this.add
       .text(width / 2, height / 2, label, {
         fontFamily: "Courier New",
-        fontSize: "15px",
+        fontSize: height <= 30 ? "14px" : "15px",
         fontStyle: "bold",
         color: "#1a1010",
         align: "center",
@@ -528,10 +548,12 @@ export class PubGameScene extends Phaser.Scene {
     this.visitSlots.forEach((slot, index) => {
       const used = index < active.dartsThrown;
       const current = index === active.dartsThrown && this.state.phase !== "game-over";
+      const color = used ? 0x7b8174 : current ? 0xf2d18a : 0x6b6555;
+      const alpha = used || current ? 1 : 0.24;
       slot.frame.setStrokeStyle(2, current ? 0xe7bd54 : used ? 0x52645b : 0x6b6555);
       slot.frame.setFillStyle(current ? 0x21170d : 0x111515, current ? 1 : 0.9);
-      slot.dart.setAlpha(used || current ? 1 : 0.22);
-      slot.dart.setColor(used ? "#7b8174" : current ? "#f2d18a" : "#6b6555");
+      slot.dart.setAlpha(1);
+      this.drawVisitDart(slot.dart, 1120 + index * 42, 226, color, alpha);
     });
   }
 

@@ -193,7 +193,7 @@ function buildPanels() {
   drawPanel(c, 14, 14, 210, 140, { trim: rgba(0xa3582b, 255), inner: rgba(0x3f834e, 150) });
   drawPanel(c, 14, 166, 210, 74, { trim: rgba(0xa3582b, 255) });
   drawPanel(c, 30, 268, 158, 88, { trim: rgba(0x8c5a25, 255) });
-  drawPanel(c, 632, 32, 132, 178, { trim: rgba(0x9f5f20, 255), inner: rgba(0x344b31, 140) });
+  drawPanel(c, 672, 32, 132, 178, { trim: rgba(0x9f5f20, 255), inner: rgba(0x344b31, 140) });
   drawPanel(c, 966, 14, 300, 144, { trim: rgba(0x284f64, 255), inner: rgba(0x2f6a82, 150) });
   drawPanel(c, 986, 168, 280, 114, { trim: rgba(0x6c5a35, 255), inner: rgba(0x555d44, 150) });
   drawPanel(c, 986, 292, 280, 108, { trim: rgba(0x6c5a35, 255), inner: rgba(0x435c32, 150) });
