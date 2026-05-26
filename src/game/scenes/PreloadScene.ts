@@ -3,8 +3,7 @@ import Phaser from "phaser";
 const pubRoomUrl = new URL("../../assets/background/pub-room.png", import.meta.url).href;
 const panelsUrl = new URL("../../assets/ui/panels.png", import.meta.url).href;
 const cpuOpponentUrl = new URL("../../assets/portraits/cpu-opponent.png", import.meta.url).href;
-const cardFramesUrl = new URL("../../assets/cards/card-frames.png", import.meta.url).href;
-const cardIconsUrl = new URL("../../assets/cards/card-icons.png", import.meta.url).href;
+const cardFrontsUrl = new URL("../../assets/cards/card-fronts.png", import.meta.url).href;
 
 export class PreloadScene extends Phaser.Scene {
   constructor() {
@@ -25,13 +24,9 @@ export class PreloadScene extends Phaser.Scene {
     this.load.image("pub-room", pubRoomUrl);
     this.load.image("ui-panels", panelsUrl);
     this.load.image("cpu-opponent", cpuOpponentUrl);
-    this.load.spritesheet("card-frames", cardFramesUrl, {
+    this.load.spritesheet("card-fronts", cardFrontsUrl, {
       frameWidth: 156,
       frameHeight: 198
-    });
-    this.load.spritesheet("card-icons", cardIconsUrl, {
-      frameWidth: 64,
-      frameHeight: 64
     });
   }
 

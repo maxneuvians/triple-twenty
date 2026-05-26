@@ -4,6 +4,7 @@ import { deflateSync } from "node:zlib";
 
 const out = {
   panels: "src/assets/ui/panels.png",
+  cardFronts: "src/assets/cards/card-fronts.png",
   cardFrames: "src/assets/cards/card-frames.png",
   cardIcons: "src/assets/cards/card-icons.png"
 };
@@ -117,6 +118,13 @@ function fillPolygon(canvas, points, color) {
       if (nodes[i + 1] === undefined) break;
       fillRect(canvas, nodes[i], y, nodes[i + 1] - nodes[i] + 1, 1, color);
     }
+  }
+}
+
+function strokePolygon(canvas, points, color, thickness = 1) {
+  for (let index = 0; index < points.length; index += 1) {
+    const next = (index + 1) % points.length;
+    line(canvas, points[index][0], points[index][1], points[next][0], points[next][1], color, thickness);
   }
 }
 
@@ -316,7 +324,223 @@ function buildIcons() {
   return c;
 }
 
+const cardSpecs = [
+  {
+    name: "Clean Hit",
+    body: 0x2e8b3f,
+    header: 0x155328,
+    bottom: 0xb8d36d,
+    accent: 0x7ccf78,
+    icon: "target"
+  },
+  {
+    name: "Fat Segment",
+    body: 0xe3bf57,
+    header: 0x99732b,
+    bottom: 0xf5dc8b,
+    accent: 0xf0b632,
+    icon: "fat"
+  },
+  {
+    name: "Drift Left",
+    body: 0x145a68,
+    header: 0x0a3340,
+    bottom: 0x1d7180,
+    accent: 0x65b4c9,
+    icon: "left"
+  },
+  {
+    name: "Drift Right",
+    body: 0x145a68,
+    header: 0x0a3340,
+    bottom: 0x1d7180,
+    accent: 0x65b4c9,
+    icon: "right"
+  },
+  {
+    name: "Wire",
+    body: 0xa02620,
+    header: 0x5f1613,
+    bottom: 0xd34a31,
+    accent: 0xe25f44,
+    icon: "wire"
+  },
+  {
+    name: "Focus",
+    body: 0x5b247a,
+    header: 0x321748,
+    bottom: 0x34224a,
+    accent: 0x9570d1,
+    icon: "focus"
+  },
+  {
+    name: "Safe Setup",
+    body: 0x1d6f78,
+    header: 0x0d3c45,
+    bottom: 0x255f69,
+    accent: 0x72c4c5,
+    icon: "shield"
+  },
+  {
+    name: "Checkout Nerve",
+    body: 0xd8b447,
+    header: 0x8f6a24,
+    bottom: 0xf2d18a,
+    accent: 0xd94b32,
+    icon: "heart"
+  }
+];
+
+function drawCardTexture(canvas, x, y, w, h, base, accent) {
+  fillRect(canvas, x, y, w, h, rgba(base, 255));
+  for (let yy = y + 2; yy < y + h; yy += 4) {
+    fillRect(canvas, x + 2, yy, w - 4, 1, rgba(0x000000, 34));
+  }
+  for (let xx = x + 4; xx < x + w - 4; xx += 13) {
+    for (let yy = y + 6; yy < y + h - 6; yy += 17) {
+      setPixel(canvas, xx, yy, rgba(accent, 95));
+      setPixel(canvas, xx + 1, yy + 1, rgba(0x000000, 45));
+    }
+  }
+}
+
+function drawCardFront(canvas, frame, spec) {
+  const w = 156;
+  const h = 198;
+  const x = frame * w;
+  const gold = rgba(0xf2d18a, 255);
+  const dark = rgba(0x080a09, 255);
+  const shadow = rgba(0x000000, 180);
+
+  fillRect(canvas, x, 0, w, h, rgba(0x050506, 0));
+  fillRect(canvas, x + 4, 4, w - 7, h - 5, shadow);
+  fillRect(canvas, x + 7, 5, w - 14, h - 10, dark);
+  drawCardTexture(canvas, x + 12, 10, w - 24, h - 20, spec.body, spec.accent);
+  fillRect(canvas, x + 18, 16, w - 36, 30, rgba(spec.header, 238));
+  fillRect(canvas, x + 18, 136, w - 36, 44, rgba(spec.bottom, 238));
+  fillRect(canvas, x + 20, 18, w - 40, 1, rgba(0xffffcf, 95));
+  fillRect(canvas, x + 20, 138, w - 40, 1, rgba(0xffffcf, 70));
+
+  strokeRect(canvas, x + 7, 5, w - 14, h - 10, rgba(0x15100a, 255), 2);
+  strokeRect(canvas, x + 10, 8, w - 20, h - 16, gold, 3);
+  strokeRect(canvas, x + 16, 14, w - 32, h - 28, rgba(0x2c2115, 210), 2);
+  strokeRect(canvas, x + 21, 19, w - 42, 20, rgba(0xffffcf, 95), 1);
+  strokeRect(canvas, x + 21, 139, w - 42, 36, rgba(0x1e160f, 115), 1);
+  fillRect(canvas, x + 13, 168, 12, 12, rgba(spec.accent, 255));
+  strokeRect(canvas, x + 15, 170, 8, 8, gold, 1);
+
+  fillRect(canvas, x + 13, 9, 18, 4, gold);
+  fillRect(canvas, x + 13, 9, 4, 18, gold);
+  fillRect(canvas, x + w - 31, 9, 18, 4, gold);
+  fillRect(canvas, x + w - 17, 9, 4, 18, gold);
+  fillRect(canvas, x + 13, h - 13, 18, 4, gold);
+  fillRect(canvas, x + 13, h - 27, 4, 18, gold);
+  fillRect(canvas, x + w - 31, h - 13, 18, 4, gold);
+  fillRect(canvas, x + w - 17, h - 27, 4, 18, gold);
+
+  drawLargeCardIcon(canvas, x + 78, 94, spec.icon, spec.accent);
+}
+
+function drawLargeCardIcon(canvas, cx, cy, icon, accentHex) {
+  const white = rgba(0xf5e7b8, 255);
+  const dark = rgba(0x16100c, 255);
+  const red = rgba(0xb72e2e, 255);
+  const green = rgba(0x178251, 255);
+  const gold = rgba(0xe7bd54, 255);
+  const grey = rgba(0x9d9683, 255);
+  const accent = rgba(accentHex, 255);
+
+  if (icon === "target") {
+    strokeCircle(canvas, cx, cy, 32, dark, 8);
+    strokeCircle(canvas, cx, cy, 23, white, 7);
+    strokeCircle(canvas, cx, cy, 13, dark, 6);
+    fillCircle(canvas, cx, cy, 8, red);
+    fillCircle(canvas, cx, cy, 3, white);
+    return;
+  }
+
+  if (icon === "fat") {
+    fillCircle(canvas, cx, cy, 33, white);
+    fillPolygon(canvas, [[cx, cy], [cx - 29, cy - 28], [cx + 31, cy - 20]], dark);
+    fillPolygon(canvas, [[cx, cy], [cx + 31, cy - 20], [cx + 28, cy + 30]], green);
+    fillPolygon(canvas, [[cx, cy], [cx - 29, cy - 28], [cx - 24, cy + 30]], rgba(0xf2d18a, 255));
+    strokeCircle(canvas, cx, cy, 33, dark, 3);
+    line(canvas, cx - 27, cy - 25, cx + 28, cy + 28, red, 5);
+    line(canvas, cx - 25, cy - 21, cx + 26, cy + 30, rgba(0xf5e7b8, 180), 1);
+    return;
+  }
+
+  if (icon === "left" || icon === "right") {
+    const dir = icon === "left" ? -1 : 1;
+    fillPolygon(canvas, [
+      [cx - dir * 35, cy],
+      [cx - dir * 5, cy - 30],
+      [cx - dir * 5, cy - 12],
+      [cx + dir * 28, cy - 12],
+      [cx + dir * 28, cy + 12],
+      [cx - dir * 5, cy + 12],
+      [cx - dir * 5, cy + 30]
+    ], gold);
+    strokePolygon(canvas, [
+      [cx - dir * 35, cy],
+      [cx - dir * 5, cy - 30],
+      [cx - dir * 5, cy - 12],
+      [cx + dir * 28, cy - 12],
+      [cx + dir * 28, cy + 12],
+      [cx - dir * 5, cy + 12],
+      [cx - dir * 5, cy + 30]
+    ], dark, 2);
+    for (let offset = -18; offset <= 18; offset += 12) {
+      line(canvas, cx - dir * 48, cy + offset, cx - dir * 28, cy + offset - 8, accent, 2);
+    }
+    return;
+  }
+
+  if (icon === "wire") {
+    line(canvas, cx - 38, cy - 18, cx + 38, cy - 36, grey, 6);
+    line(canvas, cx - 35, cy + 31, cx + 40, cy + 12, grey, 6);
+    line(canvas, cx - 15, cy - 44, cx + 15, cy + 46, dark, 5);
+    line(canvas, cx - 11, cy - 44, cx + 19, cy + 46, rgba(0xf5e7b8, 180), 1);
+    return;
+  }
+
+  if (icon === "focus") {
+    strokeCircle(canvas, cx, cy, 30, white, 4);
+    strokeCircle(canvas, cx, cy, 15, rgba(0xf2d18a, 255), 2);
+    line(canvas, cx, cy - 42, cx, cy + 42, white, 3);
+    line(canvas, cx - 42, cy, cx + 42, cy, white, 3);
+    fillCircle(canvas, cx, cy, 6, gold);
+    fillCircle(canvas, cx, cy, 2, dark);
+    return;
+  }
+
+  if (icon === "shield") {
+    fillPolygon(canvas, [[cx, cy - 42], [cx + 34, cy - 25], [cx + 28, cy + 18], [cx, cy + 43], [cx - 28, cy + 18], [cx - 34, cy - 25]], accent);
+    strokePolygon(canvas, [[cx, cy - 42], [cx + 34, cy - 25], [cx + 28, cy + 18], [cx, cy + 43], [cx - 28, cy + 18], [cx - 34, cy - 25]], white, 3);
+    strokeCircle(canvas, cx, cy - 2, 20, white, 2);
+    fillCircle(canvas, cx, cy, 8, rgba(0xf2d18a, 255));
+    return;
+  }
+
+  if (icon === "heart") {
+    fillCircle(canvas, cx - 13, cy - 8, 16, red);
+    fillCircle(canvas, cx + 13, cy - 8, 16, red);
+    fillPolygon(canvas, [[cx - 29, cy - 1], [cx + 29, cy - 1], [cx, cy + 38]], red);
+    strokeCircle(canvas, cx - 13, cy - 8, 17, dark, 2);
+    strokeCircle(canvas, cx + 13, cy - 8, 17, dark, 2);
+    line(canvas, cx - 25, cy + 3, cx, cy + 38, dark, 2);
+    line(canvas, cx + 25, cy + 3, cx, cy + 38, dark, 2);
+  }
+}
+
+function buildCardFronts() {
+  const c = makeCanvas(156 * cardSpecs.length, 198);
+  cardSpecs.forEach((spec, index) => drawCardFront(c, index, spec));
+  return c;
+}
+
 savePng(out.panels, buildPanels());
+savePng(out.cardFronts, buildCardFronts());
 savePng(out.cardFrames, buildCardFrames());
 savePng(out.cardIcons, buildIcons());
 

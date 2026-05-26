@@ -18,6 +18,9 @@ import { targetForScore, targetLabel, targetScore } from "../rules/scoring";
 type CardView = {
   card: Card;
   container: Phaser.GameObjects.Container;
+  frame: Phaser.GameObjects.Sprite;
+  glow: Phaser.GameObjects.Rectangle;
+  playable: boolean;
 };
 
 type PixelButton = {
@@ -41,7 +44,7 @@ type CardColors = {
 
 const cardWidth = 156;
 const cardHeight = 198;
-const iconFrameByCard: Record<CardName, number> = {
+const cardFrontFrameByCard: Record<CardName, number> = {
   "Clean Hit": 0,
   "Fat Segment": 1,
   "Drift Left": 2,
@@ -106,6 +109,7 @@ export class PubGameScene extends Phaser.Scene {
   private discardButton!: PixelButton;
   private newGameButton!: PixelButton;
   private hoveredTarget?: Target;
+  private hoveredCardId?: string;
   private waitingForPlayerDrift = false;
   private cpuRunning = false;
   private logScrollOffset = 0;
@@ -496,6 +500,8 @@ export class PubGameScene extends Phaser.Scene {
         }
       }
     );
+    this.input.on("pointermove", (pointer: Phaser.Input.Pointer) => this.syncCardHover(pointer));
+    this.input.on("gameout", () => this.clearCardHover());
     this.actionButton = this.makeButton(684, 674, 174, 30, "THROW DART", () => this.primaryAction());
     this.discardButton = this.makeButton(1004, 674, 102, 30, "DISCARD", () => this.discardTechniques());
     this.newGameButton = this.makeButton(1120, 674, 124, 30, "NEW LEG", () => this.newGame());
@@ -660,33 +666,23 @@ export class PubGameScene extends Phaser.Scene {
     }
     this.handViews = [];
 
-    const hand = this.state.players.player.hand;
+    const hand = this.displayOrderedHand();
     const startX = 50;
     const y = 450;
     hand.forEach((card, index) => {
       const x = startX + index * 174;
       const playable = this.isCardPlayable(card);
       const colors = cardTextColors[card.name];
-      const container = this.add.container(x, y).setDepth(9).setAlpha(playable ? 1 : 0.82);
+      const container = this.add.container(x, y).setDepth(9);
       const glow = this.add
-        .rectangle(-5, -5, cardWidth + 10, cardHeight + 10, 0xffd166, playable ? 0.14 : 0)
+        .rectangle(-5, -5, cardWidth + 10, cardHeight + 10, 0xffd166, playable ? 0.06 : 0)
         .setOrigin(0, 0)
-        .setStrokeStyle(playable ? 2 : 0, 0xffd166, playable ? 0.9 : 0);
-      const frame = this.add.sprite(0, 0, "card-frames", this.cardFrameIndex(card)).setOrigin(0, 0);
-      const kind = this.add
-        .text(20, 20, this.cardKindLabel(card), {
-          fontFamily: "Courier New",
-          fontSize: "10px",
-          fontStyle: "bold",
-          color: colors.label,
-          fixedWidth: 116,
-          align: "center"
-        })
-        .setOrigin(0, 0);
+        .setStrokeStyle(playable ? 2 : 0, 0xffd166, playable ? 0.65 : 0);
+      const frame = this.add.sprite(0, 0, "card-fronts", cardFrontFrameByCard[card.name]).setOrigin(0, 0);
       const title = this.add
-        .text(18, 36, card.name.toUpperCase(), {
+        .text(18, 20, card.name.toUpperCase(), {
           fontFamily: "Courier New",
-          fontSize: card.name.length > 12 ? "12px" : "14px",
+          fontSize: card.name.length > 12 ? "11px" : "14px",
           fontStyle: "bold",
           color: colors.label,
           fixedWidth: 120,
@@ -694,9 +690,8 @@ export class PubGameScene extends Phaser.Scene {
           wordWrap: { width: 120 }
         })
         .setOrigin(0, 0);
-      const icon = this.add.sprite(78, 94, "card-icons", iconFrameByCard[card.name]).setDisplaySize(58, 58);
       const body = this.add
-        .text(24, 137, this.cardHint(card.name), {
+        .text(24, 144, this.cardHint(card.name), {
           fontFamily: "Courier New",
           fontSize: "11px",
           fontStyle: "bold",
@@ -707,35 +702,61 @@ export class PubGameScene extends Phaser.Scene {
           wordWrap: { width: 108 }
         })
         .setOrigin(0, 0);
-      container.add([glow, frame, kind, title, icon, body]);
+      container.add([glow, frame, title, body]);
       if (playable) {
         container.setSize(cardWidth, cardHeight);
         container.setInteractive(new Phaser.Geom.Rectangle(0, 0, cardWidth, cardHeight), Phaser.Geom.Rectangle.Contains);
         if (container.input) container.input.cursor = "pointer";
-        container.on("pointerover", () => {
-          container.setScale(1.03);
-          glow.setAlpha(0.28);
-        });
-        container.on("pointerout", () => {
-          container.setScale(1);
-          glow.setAlpha(0.14);
-        });
         container.on("pointerdown", () => this.playCard(card));
       }
-      this.handViews.push({ card, container });
+      this.handViews.push({ card, container, frame, glow, playable });
     });
+    this.syncCardHover();
   }
 
-  private cardFrameIndex(card: Card): number {
-    if (card.name === "Checkout Nerve") return 3;
-    if (card.kind === "counterplay") return 2;
-    if (card.kind === "technique") return 1;
-    return 0;
+  private syncCardHover(pointer = this.input.activePointer) {
+    const next = this.handViews.find((view) => this.isPointerOverCard(view, pointer))?.card.id;
+    if (next === this.hoveredCardId) return;
+    this.hoveredCardId = next;
+    this.applyCardHover();
   }
 
-  private cardKindLabel(card: Card): string {
-    if (card.name === "Checkout Nerve") return "CHECKOUT";
-    return card.kind.toUpperCase();
+  private isPointerOverCard(view: CardView, pointer: Phaser.Input.Pointer): boolean {
+    if (!view.playable) return false;
+    const localX = pointer.x - view.container.x;
+    const localY = pointer.y - view.container.y;
+    return localX >= 0 && localX <= cardWidth && localY >= 0 && localY <= cardHeight;
+  }
+
+  private clearCardHover() {
+    if (!this.hoveredCardId) return;
+    this.hoveredCardId = undefined;
+    this.applyCardHover();
+  }
+
+  private applyCardHover() {
+    for (const view of this.handViews) {
+      const hovered = view.card.id === this.hoveredCardId;
+      view.glow.setAlpha(hovered ? 0.28 : view.playable ? 0.06 : 0);
+      if (hovered) {
+        view.frame.setTint(0xfff1a3);
+      } else {
+        view.frame.clearTint();
+      }
+    }
+  }
+
+  private displayOrderedHand(): Card[] {
+    return this.state.players.player.hand
+      .map((card, index) => ({ card, index }))
+      .sort((a, b) => this.handGroupWeight(a.card) - this.handGroupWeight(b.card) || a.index - b.index)
+      .map(({ card }) => card);
+  }
+
+  private handGroupWeight(card: Card): number {
+    if (isOutcome(card)) return 0;
+    if (isCounterplay(card)) return 1;
+    return 2;
   }
 
   private cardHint(name: CardName): string {
