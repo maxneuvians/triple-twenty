@@ -1,5 +1,6 @@
 import Phaser from "phaser";
 import "./style.css";
+import { PreloadScene } from "./game/scenes/PreloadScene";
 import { PubGameScene } from "./game/scenes/PubGameScene";
 
 const config: Phaser.Types.Core.GameConfig = {
@@ -14,7 +15,7 @@ const config: Phaser.Types.Core.GameConfig = {
     mode: Phaser.Scale.FIT,
     autoCenter: Phaser.Scale.CENTER_BOTH
   },
-  scene: [PubGameScene]
+  scene: [PreloadScene, PubGameScene]
 };
 
 new Phaser.Game(config);

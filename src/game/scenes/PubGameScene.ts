@@ -13,27 +13,67 @@ import {
 } from "../rules/game";
 import { dartboardOrder, type Card, type CardName, type GameState, type PlayerId, type Target } from "../rules/types";
 import { isCounterplay, isOutcome, isTechnique } from "../rules/cards";
-import { targetLabel, targetScore } from "../rules/scoring";
+import { targetForScore, targetLabel, targetScore } from "../rules/scoring";
 
 type CardView = {
   card: Card;
-  rect: Phaser.GameObjects.Rectangle;
-  title: Phaser.GameObjects.Text;
-  type: Phaser.GameObjects.Text;
-  body: Phaser.GameObjects.Text;
+  container: Phaser.GameObjects.Container;
 };
 
-const boardCenter = { x: 320, y: 320 };
-const boardRadius = 205;
+type PixelButton = {
+  root: Phaser.GameObjects.Container;
+  plate: Phaser.GameObjects.Rectangle;
+  title: Phaser.GameObjects.Text;
+  setText: (text: string) => void;
+  setVisible: (visible: boolean) => void;
+  setAlpha: (alpha: number) => void;
+};
+
+type VisitSlot = {
+  frame: Phaser.GameObjects.Rectangle;
+  dart: Phaser.GameObjects.Text;
+};
+
+type CardColors = {
+  label: string;
+  body: string;
+};
+
+const cardWidth = 156;
+const cardHeight = 198;
+const iconFrameByCard: Record<CardName, number> = {
+  "Clean Hit": 0,
+  "Fat Segment": 1,
+  "Drift Left": 2,
+  "Drift Right": 3,
+  Wire: 4,
+  Focus: 5,
+  "Safe Setup": 6,
+  "Checkout Nerve": 7
+};
+
+const cardTextColors: Record<CardName, CardColors> = {
+  "Clean Hit": { label: "#f7e2b3", body: "#111510" },
+  "Fat Segment": { label: "#f7e2b3", body: "#111510" },
+  "Drift Left": { label: "#f7e2b3", body: "#f4e6be" },
+  "Drift Right": { label: "#f7e2b3", body: "#f4e6be" },
+  Wire: { label: "#f7e2b3", body: "#111510" },
+  Focus: { label: "#f7e2b3", body: "#f4e6be" },
+  "Safe Setup": { label: "#f7e2b3", body: "#f4e6be" },
+  "Checkout Nerve": { label: "#1a1010", body: "#111510" }
+};
+
+const boardCenter = { x: 418, y: 250 };
+const boardRadius = 172;
 const segmentSpan = 18;
 const halfSegment = segmentSpan / 2;
 const boardRings = {
-  bull: 20,
-  outerBull: 42,
-  innerSingle: 96,
-  trebleOuter: 120,
-  outerSingle: 184,
-  doubleOuter: 205
+  bull: 16,
+  outerBull: 35,
+  innerSingle: 81,
+  trebleOuter: 101,
+  outerSingle: 154,
+  doubleOuter: 172
 };
 
 export class PubGameScene extends Phaser.Scene {
@@ -41,20 +81,28 @@ export class PubGameScene extends Phaser.Scene {
   private board!: Phaser.GameObjects.Graphics;
   private hitFlash!: Phaser.GameObjects.Graphics;
   private boardLabels: Phaser.GameObjects.Text[] = [];
-  private ui!: Phaser.GameObjects.Container;
   private handViews: CardView[] = [];
   private promptText!: Phaser.GameObjects.Text;
-  private scoreText!: Phaser.GameObjects.Text;
+  private playerScoreText!: Phaser.GameObjects.Text;
+  private playerMetaText!: Phaser.GameObjects.Text;
+  private checkoutText!: Phaser.GameObjects.Text;
+  private cpuScoreText!: Phaser.GameObjects.Text;
+  private cpuMetaText!: Phaser.GameObjects.Text;
   private visitText!: Phaser.GameObjects.Text;
+  private visitSlots: VisitSlot[] = [];
+  private centerSignText!: Phaser.GameObjects.Text;
   private logText!: Phaser.GameObjects.Text;
   private logStatusText!: Phaser.GameObjects.Text;
-  private logUpButton!: Phaser.GameObjects.Text;
-  private logDownButton!: Phaser.GameObjects.Text;
+  private logUpButton!: PixelButton;
+  private logDownButton!: PixelButton;
   private logZone!: Phaser.GameObjects.Zone;
   private targetText!: Phaser.GameObjects.Text;
-  private actionButton!: Phaser.GameObjects.Text;
-  private discardButton!: Phaser.GameObjects.Text;
-  private newGameButton!: Phaser.GameObjects.Text;
+  private resultText!: Phaser.GameObjects.Text;
+  private deckText!: Phaser.GameObjects.Text;
+  private discardText!: Phaser.GameObjects.Text;
+  private actionButton!: PixelButton;
+  private discardButton!: PixelButton;
+  private newGameButton!: PixelButton;
   private waitingForPlayerDrift = false;
   private cpuRunning = false;
   private logScrollOffset = 0;
@@ -73,41 +121,19 @@ export class PubGameScene extends Phaser.Scene {
   }
 
   private createPubBackdrop() {
-    const g = this.add.graphics();
-    g.fillGradientStyle(0x2b1511, 0x2b1511, 0x130b0b, 0x130b0b, 1);
-    g.fillRect(0, 0, 1280, 720);
+    this.add.image(640, 360, "pub-room").setDisplaySize(1280, 720).setDepth(0);
+    this.add.rectangle(640, 360, 1280, 720, 0x000000, 0.1).setDepth(1);
+    this.add.image(640, 360, "ui-panels").setDepth(4);
 
-    g.fillStyle(0x3a1f17, 1);
-    for (let x = 0; x < 1280; x += 72) {
-      g.fillRect(x, 0, 36, 520);
-      g.fillStyle(0x26130f, 0.55);
-      g.fillRect(x + 34, 0, 3, 520);
-      g.fillStyle(0x3a1f17, 1);
-    }
+    const vignette = this.add.graphics().setDepth(19);
+    vignette.fillStyle(0x000000, 0.24);
+    vignette.fillRect(0, 0, 1280, 24);
+    vignette.fillRect(0, 696, 1280, 24);
+    vignette.fillRect(0, 0, 18, 720);
+    vignette.fillRect(1262, 0, 18, 720);
 
-    g.fillStyle(0x18100d, 1);
-    g.fillRect(0, 520, 1280, 200);
-    g.fillStyle(0x0d4a37, 1);
-    g.fillRect(0, 560, 1280, 160);
-    g.fillStyle(0x0f2c25, 0.5);
-    for (let x = 0; x < 1280; x += 24) {
-      g.fillRect(x, 560, 8, 160);
-    }
-
-    g.lineStyle(4, 0xb88746, 1);
-    g.strokeRect(810, 64, 155, 84);
-    g.strokeRect(988, 72, 118, 74);
-    g.fillStyle(0xe8c176, 1);
-    g.fillRect(842, 98, 92, 6);
-    g.fillRect(1014, 102, 68, 6);
-
-    g.fillStyle(0x25130e, 0.72);
-    g.fillRoundedRect(680, 190, 535, 320, 8);
-    g.lineStyle(2, 0xb88746, 0.55);
-    g.strokeRoundedRect(680, 190, 535, 320, 8);
-
-    this.add.rectangle(640, 360, 1280, 720, 0x000000, 0.12);
     const scanlines = this.add.graphics();
+    scanlines.setDepth(20);
     scanlines.lineStyle(1, 0x000000, 0.14);
     for (let y = 0; y < 720; y += 4) {
       scanlines.lineBetween(0, y, 1280, y);
@@ -335,12 +361,12 @@ export class PubGameScene extends Phaser.Scene {
     for (const label of this.boardLabels) label.destroy();
     this.boardLabels = dartboardOrder.map((number, index) => {
       const angle = Phaser.Math.DegToRad(index * 18 - 90);
-      const x = boardCenter.x + Math.cos(angle) * 238;
-      const y = boardCenter.y + Math.sin(angle) * 238;
+      const x = boardCenter.x + Math.cos(angle) * (boardRadius + 17);
+      const y = boardCenter.y + Math.sin(angle) * (boardRadius + 17);
       return this.add
         .text(x, y, String(number), {
           fontFamily: "Courier New",
-          fontSize: "18px",
+          fontSize: "17px",
           color: "#f7e2b3",
           fontStyle: "bold"
         })
@@ -353,9 +379,9 @@ export class PubGameScene extends Phaser.Scene {
     const dx = x - boardCenter.x;
     const dy = y - boardCenter.y;
     const distance = Math.sqrt(dx * dx + dy * dy);
-    if (distance > boardRadius + 16) return undefined;
-    if (distance <= 20) return { ring: "bull" };
-    if (distance <= 42) return { ring: "outerBull" };
+    if (distance > boardRings.doubleOuter) return undefined;
+    if (distance <= boardRings.bull) return { ring: "bull" };
+    if (distance <= boardRings.outerBull) return { ring: "outerBull" };
 
     const degrees = Phaser.Math.RadToDeg(Math.atan2(dy, dx));
     const clockwiseFromTop = (degrees + 90 + 360) % 360;
@@ -367,16 +393,39 @@ export class PubGameScene extends Phaser.Scene {
   }
 
   private createUiShell() {
-    this.ui = this.add.container(0, 0);
-    this.scoreText = this.addText(706, 216, "", 28, "#f7e2b3", true, 470, 36);
-    this.visitText = this.addText(706, 276, "", 20, "#e8c176", false, 470, 26);
-    this.targetText = this.addText(706, 316, "", 20, "#9be2c1", false, 470, 26);
-    this.promptText = this.addText(706, 360, "", 20, "#ffd166", true, 470, 52);
-    this.logStatusText = this.addText(706, 410, "", 12, "#e8c176", false, 360, 16);
-    this.logText = this.addText(706, 432, "", 14, "#f7e2b3", false, 430, 76);
-    this.logUpButton = this.makeButton(1150, 424, "^", () => this.scrollLog(1));
-    this.logDownButton = this.makeButton(1150, 468, "v", () => this.scrollLog(-1));
-    this.logZone = this.add.zone(936, 470, 470, 88);
+    this.playerScoreText = this.addText(36, 64, "", 60, "#e7bd54", true, 166, 72).setShadow(3, 3, "#000000", 0, false, true);
+    this.playerMetaText = this.addText(36, 34, "PLAYER", 20, "#ff604a", true, 166, 22);
+    this.addText(38, 126, "LEG 1    SETS 0", 15, "#f2d18a", true, 158, 20);
+    this.checkoutText = this.addText(36, 184, "", 18, "#f2d18a", true, 166, 40);
+    this.addText(52, 288, "BULL\nFINISH\nSTRONG", 17, "#b8c45c", true, 118, 54);
+
+    this.centerSignText = this.addText(652, 76, "301\nBEST OF\n5 LEGS", 24, "#e7bd54", true, 92, 112);
+    this.addText(652, 50, "TONIGHT", 14, "#70b765", true, 92, 18);
+
+    this.add.image(1029, 86, "cpu-opponent").setDisplaySize(98, 98).setDepth(5);
+    this.cpuScoreText = this.addText(1112, 64, "", 54, "#e7bd54", true, 120, 66).setShadow(3, 3, "#000000", 0, false, true);
+    this.cpuMetaText = this.addText(1112, 36, "CPU", 18, "#77b9da", true, 120, 24);
+    this.addText(1112, 126, "LEG 1  SETS 0", 14, "#77b9da", true, 126, 20);
+
+    this.visitText = this.addText(1014, 188, "", 20, "#e8c176", true, 92, 50);
+    this.visitSlots = [0, 1, 2].map((index) => {
+      const frame = this.add.rectangle(1120 + index * 42, 226, 34, 54, 0x111515, 0.9).setStrokeStyle(2, 0x6b6555).setDepth(6);
+      const dart = this.addText(1113 + index * 42, 206, "|>", 28, "#f2d18a", true, 28, 42);
+      return { frame, dart };
+    });
+
+    this.promptText = this.addText(1014, 316, "", 18, "#ffd166", true, 222, 54);
+    this.logStatusText = this.addText(720, 278, "", 11, "#77b9da", true, 194, 16);
+    this.logText = this.addText(720, 300, "", 12, "#f7e2b3", false, 202, 76);
+    this.logUpButton = this.makeButton(926, 304, 26, 24, "^", () => this.scrollLog(1));
+    this.logDownButton = this.makeButton(926, 358, 26, 24, "v", () => this.scrollLog(-1));
+    this.logZone = this.add.zone(835, 334, 228, 104);
+
+    this.deckText = this.addText(1006, 464, "", 15, "#77b9da", true, 98, 28);
+    this.discardText = this.addText(1136, 464, "", 15, "#a7a49b", true, 98, 28);
+
+    this.targetText = this.addText(84, 674, "", 18, "#ffd166", true, 230, 24);
+    this.resultText = this.addText(326, 674, "", 16, "#70b765", true, 300, 24);
     this.input.on(
       "wheel",
       (pointer: Phaser.Input.Pointer, _gameObjects: Phaser.GameObjects.GameObject[], _deltaX: number, deltaY: number) => {
@@ -385,9 +434,9 @@ export class PubGameScene extends Phaser.Scene {
         }
       }
     );
-    this.actionButton = this.makeButton(706, 518, "THROW DART", () => this.primaryAction());
-    this.discardButton = this.makeButton(906, 518, "DISCARD TECH", () => this.discardTechniques());
-    this.newGameButton = this.makeButton(1084, 518, "NEW LEG", () => this.newGame());
+    this.actionButton = this.makeButton(682, 673, 182, 34, "THROW DART", () => this.primaryAction());
+    this.discardButton = this.makeButton(874, 673, 84, 34, "DISCARD", () => this.discardTechniques());
+    this.newGameButton = this.makeButton(1020, 673, 206, 34, "NEW LEG", () => this.newGame());
   }
 
   private addText(x: number, y: number, text: string, size: number, color: string, bold = false, width?: number, height?: number) {
@@ -403,38 +452,87 @@ export class PubGameScene extends Phaser.Scene {
     return this.add.text(x, y, text, style).setDepth(6);
   }
 
-  private makeButton(x: number, y: number, label: string, onClick: () => void) {
-    const button = this.add
-      .text(x, y, label, {
+  private makeButton(x: number, y: number, width: number, height: number, label: string, onClick: () => void): PixelButton {
+    const root = this.add.container(x, y).setDepth(8);
+    const plate = this.add.rectangle(0, 0, width, height, 0xd2a94f, 0.95).setOrigin(0, 0).setStrokeStyle(2, 0x2a140b);
+    const title = this.add
+      .text(width / 2, height / 2, label, {
         fontFamily: "Courier New",
-        fontSize: "16px",
+        fontSize: "15px",
         fontStyle: "bold",
         color: "#1a1010",
-        backgroundColor: "#e8c176",
-        padding: { x: 12, y: 8 }
+        align: "center",
+        fixedWidth: width,
+        fixedHeight: height
       })
-      .setInteractive({ cursor: "pointer" });
-    button.on("pointerdown", onClick);
-    return button;
+      .setOrigin(0.5);
+    root.add([plate, title]);
+    root.setSize(width, height);
+    root.setInteractive(new Phaser.Geom.Rectangle(0, 0, width, height), Phaser.Geom.Rectangle.Contains);
+    if (root.input) root.input.cursor = "pointer";
+    root.on("pointerover", () => plate.setFillStyle(0xf1cd70, 1));
+    root.on("pointerout", () => plate.setFillStyle(0xd2a94f, 0.95));
+    root.on("pointerdown", () => {
+      plate.setFillStyle(0x9f6b2d, 1);
+      onClick();
+    });
+    root.on("pointerup", () => plate.setFillStyle(0xf1cd70, 1));
+    return {
+      root,
+      plate,
+      title,
+      setText: (value: string) => title.setText(value),
+      setVisible: (visible: boolean) => {
+        root.setVisible(visible);
+      },
+      setAlpha: (alpha: number) => {
+        root.setAlpha(alpha);
+      }
+    };
   }
 
   private refresh() {
     this.drawBoard(this.state.pendingDart?.target);
     const player = this.state.players.player;
     const cpu = this.state.players.cpu;
-    this.scoreText.setText(`PLAYER ${player.score}   CPU ${cpu.score}`);
+    this.playerScoreText.setText(String(player.score));
+    this.cpuScoreText.setText(String(cpu.score));
+    this.playerMetaText.setText("PLAYER");
+    this.cpuMetaText.setText("CPU OPPONENT");
+    this.checkoutText.setText(`CHECKOUT\n${this.checkoutSuggestion(player.score)}`);
     this.visitText.setText(
-      `${this.state.players[this.state.activePlayerId].label.toUpperCase()} VISIT   DART ${this.state.players[this.state.activePlayerId].dartsThrown + 1}/3`
+      `VISIT\n${this.state.players[this.state.activePlayerId].dartsThrown + 1}/3`
     );
+    this.updateVisitSlots();
     this.targetText.setText(
-      `TARGET ${targetLabel(this.state.pendingDart?.target)}   RESULT ${targetLabel(this.state.lastDart?.finalTarget)}`
+      `TARGET: ${targetLabel(this.state.pendingDart?.target)}`
     );
+    this.resultText.setText(`DART ${this.state.players[this.state.activePlayerId].dartsThrown + 1} OF 3  |  HIT: ${targetLabel(this.state.lastDart?.finalTarget)}`);
+    this.deckText.setText(`DRAW DECK\n${player.deck.length}`);
+    this.discardText.setText(`DISCARD\n${player.discard.length}`);
     this.promptText.setText(this.prompt());
     this.renderLog();
     this.actionButton.setText(this.primaryActionLabel());
     this.actionButton.setVisible(this.canUsePrimaryAction());
     this.discardButton.setVisible(this.state.activePlayerId === "player" && this.state.phase === "declare-target");
     this.renderHand();
+  }
+
+  private checkoutSuggestion(score: number): string {
+    const checkout = targetForScore(score);
+    return checkout ? targetLabel(checkout) : "---";
+  }
+
+  private updateVisitSlots() {
+    const active = this.state.players[this.state.activePlayerId];
+    this.visitSlots.forEach((slot, index) => {
+      const used = index < active.dartsThrown;
+      const current = index === active.dartsThrown && this.state.phase !== "game-over";
+      slot.frame.setStrokeStyle(2, current ? 0xe7bd54 : used ? 0x52645b : 0x6b6555);
+      slot.frame.setFillStyle(current ? 0x21170d : 0x111515, current ? 1 : 0.9);
+      slot.dart.setAlpha(used || current ? 1 : 0.22);
+      slot.dart.setColor(used ? "#7b8174" : current ? "#f2d18a" : "#6b6555");
+    });
   }
 
   private isInsideLogZone(x: number, y: number): boolean {
@@ -476,31 +574,86 @@ export class PubGameScene extends Phaser.Scene {
 
   private renderHand() {
     for (const view of this.handViews) {
-      view.rect.destroy();
-      view.title.destroy();
-      view.type.destroy();
-      view.body.destroy();
+      view.container.destroy(true);
     }
     this.handViews = [];
 
     const hand = this.state.players.player.hand;
-    const startX = 44;
-    const y = 590;
+    const startX = 50;
+    const y = 450;
     hand.forEach((card, index) => {
-      const x = startX + index * 142;
+      const x = startX + index * 174;
       const playable = this.isCardPlayable(card);
-      const fill = card.kind === "outcome" ? 0xe8eef5 : card.kind === "technique" ? 0xf4f6f9 : 0xf0d0d0;
-      const rect = this.add
-        .rectangle(x, y, 128, 112, fill, playable ? 1 : 0.45)
+      const colors = cardTextColors[card.name];
+      const container = this.add.container(x, y).setDepth(9).setAlpha(playable ? 1 : 0.82);
+      const glow = this.add
+        .rectangle(-5, -5, cardWidth + 10, cardHeight + 10, 0xffd166, playable ? 0.14 : 0)
         .setOrigin(0, 0)
-        .setStrokeStyle(playable ? 3 : 1, playable ? 0xffd166 : 0x5f6b76)
-        .setInteractive({ cursor: playable ? "pointer" : "default" });
-      const type = this.addText(x + 8, y + 8, card.kind.toUpperCase(), 10, "#334155", true, 112, 14);
-      const title = this.addText(x + 8, y + 27, card.name, 14, "#101820", true, 112, 28);
-      const body = this.addText(x + 8, y + 64, this.cardHint(card.name), 10, "#101820", false, 112, 36);
-      if (playable) rect.on("pointerdown", () => this.playCard(card));
-      this.handViews.push({ card, rect, title, type, body });
+        .setStrokeStyle(playable ? 2 : 0, 0xffd166, playable ? 0.9 : 0);
+      const frame = this.add.sprite(0, 0, "card-frames", this.cardFrameIndex(card)).setOrigin(0, 0);
+      const kind = this.add
+        .text(20, 20, this.cardKindLabel(card), {
+          fontFamily: "Courier New",
+          fontSize: "10px",
+          fontStyle: "bold",
+          color: colors.label,
+          fixedWidth: 116,
+          align: "center"
+        })
+        .setOrigin(0, 0);
+      const title = this.add
+        .text(18, 36, card.name.toUpperCase(), {
+          fontFamily: "Courier New",
+          fontSize: card.name.length > 12 ? "12px" : "14px",
+          fontStyle: "bold",
+          color: colors.label,
+          fixedWidth: 120,
+          align: "center",
+          wordWrap: { width: 120 }
+        })
+        .setOrigin(0, 0);
+      const icon = this.add.sprite(78, 94, "card-icons", iconFrameByCard[card.name]).setDisplaySize(58, 58);
+      const body = this.add
+        .text(24, 137, this.cardHint(card.name), {
+          fontFamily: "Courier New",
+          fontSize: "11px",
+          fontStyle: "bold",
+          color: colors.body,
+          fixedWidth: 108,
+          fixedHeight: 44,
+          align: "center",
+          wordWrap: { width: 108 }
+        })
+        .setOrigin(0, 0);
+      container.add([glow, frame, kind, title, icon, body]);
+      if (playable) {
+        container.setSize(cardWidth, cardHeight);
+        container.setInteractive(new Phaser.Geom.Rectangle(0, 0, cardWidth, cardHeight), Phaser.Geom.Rectangle.Contains);
+        if (container.input) container.input.cursor = "pointer";
+        container.on("pointerover", () => {
+          container.setScale(1.03);
+          glow.setAlpha(0.28);
+        });
+        container.on("pointerout", () => {
+          container.setScale(1);
+          glow.setAlpha(0.14);
+        });
+        container.on("pointerdown", () => this.playCard(card));
+      }
+      this.handViews.push({ card, container });
     });
+  }
+
+  private cardFrameIndex(card: Card): number {
+    if (card.name === "Checkout Nerve") return 3;
+    if (card.kind === "counterplay") return 2;
+    if (card.kind === "technique") return 1;
+    return 0;
+  }
+
+  private cardKindLabel(card: Card): string {
+    if (card.name === "Checkout Nerve") return "CHECKOUT";
+    return card.kind.toUpperCase();
   }
 
   private cardHint(name: CardName): string {
