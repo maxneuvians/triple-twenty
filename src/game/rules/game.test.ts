@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cardKind } from "./cards";
+import { cardKind, createStarterDeck } from "./cards";
 import {
   cpuTakeTurn,
   createGame,
@@ -11,6 +11,7 @@ import {
   playTechnique,
   resolveDart
 } from "./game";
+import { shuffle } from "./random";
 import { doubleOf, driftNumber, targetScore, targetForScore } from "./scoring";
 import type { CardName, GameState, PlayerId, Target } from "./types";
 
@@ -98,8 +99,51 @@ describe("game setup", () => {
     expect(gameA.players.player.hand.map((item) => item.id)).not.toEqual(
       gameC.players.player.hand.map((item) => item.id)
     );
+    expect(gameA.players.player.hand.map((item) => item.id)).not.toEqual(
+      createStarterDeck("player").slice(0, 5).map((item) => item.id)
+    );
     expect(gameA.players.player.score).toBe(301);
     expect(gameA.players.player.hand).toHaveLength(5);
+  });
+
+  it("shuffles the discard pile into a new draw deck when the deck is exhausted", () => {
+    const recycled = ([
+      "Clean Hit",
+      "Fat Segment",
+      "Wire",
+      "Focus",
+      "Safe Setup",
+      "Drift Right"
+    ] satisfies CardName[]).map((name, index) => card(name, `recycle-${index}`));
+    const base = createGame(7);
+    const stateSeed = base.seed;
+    let state: GameState = {
+      ...base,
+      players: {
+        ...base.players,
+        player: {
+          ...base.players.player,
+          hand: [],
+          deck: [],
+          discard: recycled,
+          played: [],
+          dartsThrown: 0
+        }
+      }
+    };
+
+    state = endVisit(state);
+
+    expect(state.players.player.hand.map((item) => item.id)).toEqual(
+      shuffle(recycled, stateSeed).slice(0, 5).map((item) => item.id)
+    );
+    expect(state.players.player.hand.map((item) => item.id)).not.toEqual(
+      recycled.slice(0, 5).map((item) => item.id)
+    );
+    expect(state.players.player.deck.map((item) => item.id)).toEqual(
+      shuffle(recycled, stateSeed).slice(5).map((item) => item.id)
+    );
+    expect(state.seed).toBe(stateSeed + 1);
   });
 
   it("keeps a longer bounded action log for UI scrolling", () => {

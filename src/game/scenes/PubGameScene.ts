@@ -146,12 +146,16 @@ export class PubGameScene extends Phaser.Scene {
   }
 
   create() {
-    this.state = createGame(86);
+    this.state = createGame(this.freshLegSeed());
     this.chooseCpuPortrait();
     this.createPubBackdrop();
     this.createDartboard();
     this.createUiShell();
     this.refresh();
+  }
+
+  private freshLegSeed(): number {
+    return Math.floor((Date.now() % 0xffffffff) + Math.random() * 0xffffffff) >>> 0;
   }
 
   private createPubBackdrop() {
@@ -1191,7 +1195,7 @@ export class PubGameScene extends Phaser.Scene {
     this.countedWinner = undefined;
     this.logScrollOffset = 0;
     this.hitFlash.clear();
-    this.state = createGame(Math.floor(Date.now() % 100000));
+    this.state = createGame(this.freshLegSeed());
     this.chooseCpuPortrait();
     this.refresh();
   }

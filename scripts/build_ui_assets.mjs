@@ -462,7 +462,7 @@ function drawLargeCardIcon(canvas, cx, cy, icon, accentHex) {
   }
 
   if (icon === "left" || icon === "right") {
-    const dir = icon === "left" ? -1 : 1;
+    const dir = icon === "left" ? 1 : -1;
     fillPolygon(canvas, [
       [cx - dir * 35, cy],
       [cx - dir * 5, cy - 30],

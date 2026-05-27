@@ -43,13 +43,16 @@ function cloneState(state: GameState): GameState {
 
 function drawToHand(player: PlayerState, seed: number): { player: PlayerState; seed: number } {
   let nextSeed = seed;
-  const next = clonePlayer(player);
+  let next = clonePlayer(player);
   while (next.hand.length < handSize) {
     if (next.deck.length === 0) {
       if (next.discard.length === 0) break;
+      next = {
+        ...next,
+        deck: shuffle(next.discard, nextSeed),
+        discard: []
+      };
       nextSeed += 1;
-      next.deck = shuffle(next.discard, nextSeed);
-      next.discard = [];
     }
     const drawn = next.deck.shift();
     if (!drawn) break;
@@ -59,15 +62,14 @@ function drawToHand(player: PlayerState, seed: number): { player: PlayerState; s
 }
 
 function createPlayer(id: PlayerId, label: string, seed: number): { player: PlayerState; seed: number } {
-  const shuffled = shuffle(createStarterDeck(id), seed);
   const base: PlayerState = {
     id,
     label,
     score: 301,
     startOfVisitScore: 301,
-    deck: shuffled,
+    deck: [],
     hand: [],
-    discard: [],
+    discard: createStarterDeck(id),
     played: [],
     dartsThrown: 0
   };
@@ -85,7 +87,7 @@ export function createGame(seed = 1): GameState {
     activePlayerId: "player",
     phase: "declare-target",
     log: ["New leg: first to 301, double or bull to finish."],
-    seed,
+    seed: Math.max(player.seed, cpu.seed),
     lastDart: undefined
   };
 }
