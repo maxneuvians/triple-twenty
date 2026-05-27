@@ -1,15 +1,22 @@
 import { createStarterDeck, isCounterplay, isOutcome, isTechnique } from "./cards";
+import { chooseCpuDartPlan, chooseCpuTechniqueDiscards } from "./cpuStrategy";
 import { shuffle } from "./random";
 import {
   doubleOf,
   driftTarget,
   isLegalCheckoutTarget,
   singleOf,
-  targetForScore,
   targetLabel,
   targetScore
 } from "./scoring";
 import type { Card, CardName, CpuEvent, GameState, PlayerId, PlayerState, ResolvedDart, Target } from "./types";
+
+export {
+  chooseCpuCounterplay,
+  chooseCpuDartPlan,
+  chooseCpuDriftCancel,
+  chooseCpuTechniqueDiscards
+} from "./cpuStrategy";
 
 const handSize = 5;
 const maxLogEntries = 80;
@@ -249,7 +256,7 @@ function computeFinalTarget(state: GameState): Target | undefined {
   return targetAfterFocus(pending.target, pending.outcome.name, focusCount);
 }
 
-function finishVisit(state: GameState, options: { bust?: boolean } = {}): GameState {
+function finishVisit(state: GameState, options: { bust?: boolean; discardTechniqueCardIds?: string[] } = {}): GameState {
   const activeId = state.activePlayerId;
   const nextActiveId = opponentOf(activeId);
   let nextSeed = state.seed;
@@ -271,8 +278,18 @@ function finishVisit(state: GameState, options: { bust?: boolean } = {}): GameSt
   const activeAfterScore = options.bust
     ? { ...active, score: active.startOfVisitScore }
     : active;
+  const discardIds = new Set(options.discardTechniqueCardIds ?? []);
+  const discardedTechniques = activeAfterScore.hand.filter((card) => discardIds.has(card.id) && isTechnique(card));
+  const activeAfterDiscards =
+    discardedTechniques.length === 0
+      ? activeAfterScore
+      : {
+          ...activeAfterScore,
+          hand: activeAfterScore.hand.filter((card) => !discardIds.has(card.id) || !isTechnique(card)),
+          discard: [...activeAfterScore.discard, ...discardedTechniques]
+        };
   const visitTotal = options.bust ? 0 : Math.max(0, active.startOfVisitScore - active.score);
-  const drawn = drawToHand({ ...activeAfterScore, dartsThrown: 0 }, nextSeed);
+  const drawn = drawToHand({ ...activeAfterDiscards, dartsThrown: 0 }, nextSeed);
   players[activeId] = drawn.player;
   nextSeed = drawn.seed;
 
@@ -291,13 +308,22 @@ function finishVisit(state: GameState, options: { bust?: boolean } = {}): GameSt
     seed: nextSeed
   };
 
+  const withDiscards =
+    discardedTechniques.length > 0
+      ? appendLog(
+          nextState,
+          `${players[activeId].label} discards ${discardedTechniques.length} Technique card${
+            discardedTechniques.length === 1 ? "" : "s"
+          }.`
+        )
+      : nextState;
   return appendLog(
-    appendLog(nextState, `${players[activeId].label} visit total: ${visitTotal}.`),
+    appendLog(withDiscards, `${players[activeId].label} visit total: ${visitTotal}.`),
     `${players[nextActiveId].label} steps to the oche.`
   );
 }
 
-export function resolveDart(state: GameState): GameState {
+export function resolveDart(state: GameState, options: { discardTechniqueCardIds?: string[] } = {}): GameState {
   if (!state.pendingDart?.outcome) {
     throw new Error("No Outcome card has been played.");
   }
@@ -338,7 +364,7 @@ export function resolveDart(state: GameState): GameState {
 
   if (bust) {
     next = appendLog(next, `${active.label} busts. Score returns to ${active.startOfVisitScore}.`);
-    return finishVisit(next, { bust: true });
+    return finishVisit(next, { bust: true, discardTechniqueCardIds: options.discardTechniqueCardIds });
   }
 
   next.players[activeId] = {
@@ -350,15 +376,15 @@ export function resolveDart(state: GameState): GameState {
 
   next = appendLog(next, resolved.summary);
   if (next.players[activeId].dartsThrown >= 3) {
-    return finishVisit(next);
+    return finishVisit(next, options);
   }
   next.phase = "declare-target";
   return next;
 }
 
-export function endVisit(state: GameState): GameState {
+export function endVisit(state: GameState, options: { discardTechniqueCardIds?: string[] } = {}): GameState {
   if (state.phase === "game-over") return state;
-  return finishVisit(cloneState(state));
+  return finishVisit(cloneState(state), options);
 }
 
 export function discardUnplayedTechniques(state: GameState, names: CardName[] = []): GameState {
@@ -391,70 +417,8 @@ export function discardUnplayedTechniques(state: GameState, names: CardName[] = 
     : next;
 }
 
-function predictedTarget(target: Target, outcome: CardName, useFocus: boolean): Target | undefined {
-  return targetAfterFocus(target, outcome, useFocus ? 1 : 0);
-}
-
-function wouldBust(score: number, finalTarget: Target | undefined): boolean {
-  const dartScore = finalTarget ? targetScore(finalTarget) : 0;
-  const after = score - dartScore;
-  return after < 0 || after === 1 || (after === 0 && !isLegalCheckoutTarget(finalTarget));
-}
-
-export function chooseCpuDart(state: GameState): { target: Target; outcome: Card; focus?: Card; safeSetup?: Card } | undefined {
-  const cpu = state.players.cpu;
-  const cleanHit = cpu.hand.find((card) => card.name === "Clean Hit");
-  const checkout = targetForScore(cpu.score);
-  if (checkout && cleanHit) {
-    return { target: checkout, outcome: cleanHit };
-  }
-
-  const outcomes = cpu.hand.filter((card) => isOutcome(card));
-  const focus = cpu.hand.find((card) => card.name === "Focus");
-  const candidates: Target[] = [
-    { ring: "treble", number: 20 },
-    { ring: "treble", number: 19 },
-    { ring: "treble", number: 18 },
-    { ring: "single", number: 20 },
-    { ring: "single", number: 19 },
-    { ring: "single", number: 18 },
-    { ring: "outerBull" }
-  ];
-
-  let best: { target: Target; outcome: Card; focus?: Card; score: number } | undefined;
-  for (const target of candidates) {
-    for (const outcome of outcomes) {
-      for (const useFocus of [Boolean(focus), false]) {
-        const finalTarget = predictedTarget(target, outcome.name, useFocus);
-        if (wouldBust(cpu.score, finalTarget)) continue;
-        const score = finalTarget ? targetScore(finalTarget) : 0;
-        if (!best || score > best.score) {
-          best = { target, outcome, focus: useFocus ? focus : undefined, score };
-        }
-      }
-    }
-  }
-
-  if (best) return best;
-
-  const fallbackOutcome = outcomes.find((card) => card.name === "Wire") ?? outcomes[0];
-  return fallbackOutcome ? { target: { ring: "single", number: 1 }, outcome: fallbackOutcome } : undefined;
-}
-
-export function chooseCpuCounterplay(state: GameState): Card | undefined {
-  if (state.activePlayerId !== "player" || !state.pendingDart?.outcome) return undefined;
-  const cpu = state.players.cpu;
-  const drift = cpu.hand.find((card) => card.name === "Drift Left" || card.name === "Drift Right");
-  if (!drift) return undefined;
-
-  const player = state.players.player;
-  const cleanScore = targetScore(state.pendingDart.target);
-  const checkoutThreat =
-    isLegalCheckoutTarget(state.pendingDart.target) &&
-    cleanScore === player.score &&
-    state.pendingDart.outcome.name === "Clean Hit";
-  const highScoreThreat = state.pendingDart.target.ring === "treble" && cleanScore >= 57;
-  return checkoutThreat || highScoreThreat ? drift : undefined;
+export function chooseCpuDart(state: GameState) {
+  return chooseCpuDartPlan(state);
 }
 
 export function cpuTakeTurn(state: GameState): { state: GameState; events: CpuEvent[] } {
@@ -463,7 +427,8 @@ export function cpuTakeTurn(state: GameState): { state: GameState; events: CpuEv
   while (next.activePlayerId === "cpu" && next.phase !== "game-over") {
     const choice = chooseCpuDart(next);
     if (!choice) {
-      next = endVisit(next);
+      const discards = chooseCpuTechniqueDiscards(next);
+      next = endVisit(next, { discardTechniqueCardIds: discards });
       events.push({ type: "visit-end", message: "CPU has no Outcome cards and ends the visit.", state: next });
       break;
     }
@@ -471,11 +436,11 @@ export function cpuTakeTurn(state: GameState): { state: GameState; events: CpuEv
     events.push({ type: "declare", message: `CPU aims at ${targetLabel(choice.target)}.`, state: next });
     next = playOutcome(next, choice.outcome.id);
     events.push({ type: "play", message: `CPU plays ${choice.outcome.name}.`, state: next });
-    if (choice.focus) {
-      next = playTechnique(next, choice.focus.id);
-      events.push({ type: "play", message: "CPU plays Focus.", state: next });
+    for (const technique of choice.techniques) {
+      next = playTechnique(next, technique.id);
+      events.push({ type: "play", message: `CPU plays ${technique.name}.`, state: next });
     }
-    next = resolveDart(next);
+    next = resolveDart(next, { discardTechniqueCardIds: chooseCpuTechniqueDiscards(next) });
     events.push({ type: "resolve", message: next.lastDart?.summary ?? "CPU dart resolved.", state: next });
   }
   events.push({ type: "visit-end", message: "CPU visit complete.", state: next });

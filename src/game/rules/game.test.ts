@@ -11,6 +11,12 @@ import {
   playTechnique,
   resolveDart
 } from "./game";
+import {
+  chooseCpuCounterplay,
+  chooseCpuDartPlan,
+  chooseCpuDriftCancel,
+  chooseCpuTechniqueDiscards
+} from "./cpuStrategy";
 import { shuffle } from "./random";
 import { doubleOf, driftNumber, targetScore, targetForScore } from "./scoring";
 import type { CardName, GameState, PlayerId, Target } from "./types";
@@ -300,39 +306,163 @@ describe("Counterplay Drift", () => {
 });
 
 describe("CPU strategy", () => {
-  it("chooses a checkout when it has Clean Hit", () => {
-    let state = withScore(createGame(1), "cpu", 40);
-    state = withHand(state, "cpu", ["Clean Hit", "Wire", "Fat Segment"]);
-    state = {
+  function activeCpu(state: GameState): GameState {
+    return {
       ...state,
       activePlayerId: "cpu",
       phase: "declare-target",
       players: {
         ...state.players,
-        cpu: { ...state.players.cpu, startOfVisitScore: 40 }
+        cpu: { ...state.players.cpu, startOfVisitScore: state.players.cpu.score }
       }
     };
+  }
+
+  it("chooses a checkout when it has Clean Hit", () => {
+    let state = withScore(createGame(1), "cpu", 40);
+    state = withHand(state, "cpu", ["Clean Hit", "Wire", "Fat Segment"]);
+    state = activeCpu(state);
 
     const result = cpuTakeTurn(state);
     expect(result.state.winner).toBe("cpu");
     expect(result.events.some((event) => event.message.includes("D20"))).toBe(true);
   });
 
+  it("finds a two-dart checkout route when no immediate finish exists", () => {
+    let state = withScore(createGame(1), "cpu", 101);
+    state = withHand(state, "cpu", ["Clean Hit", "Clean Hit", "Fat Segment"]);
+    state = activeCpu(state);
+
+    const plan = chooseCpuDartPlan(state);
+
+    expect(plan?.target).toEqual({ ring: "treble", number: 17 });
+    expect(plan?.outcome.name).toBe("Clean Hit");
+    const result = cpuTakeTurn(state);
+    expect(result.state.winner).toBe("cpu");
+  });
+
+  it("uses Focus with Fat Segment to create a checkout double", () => {
+    let state = withScore(createGame(1), "cpu", 40);
+    state = withHand(state, "cpu", ["Fat Segment", "Focus"]);
+    state = activeCpu(state);
+
+    const plan = chooseCpuDartPlan(state);
+
+    expect(plan?.target).toEqual({ ring: "double", number: 20 });
+    expect(plan?.outcome.name).toBe("Fat Segment");
+    expect(plan?.techniques.map((item) => item.name)).toEqual(["Focus"]);
+    const result = cpuTakeTurn(state);
+    expect(result.state.winner).toBe("cpu");
+  });
+
+  it("uses two Focus cards with Wire only when that creates a valuable double", () => {
+    let state = withScore(createGame(1), "cpu", 32);
+    state = withHand(state, "cpu", ["Wire", "Focus", "Focus"]);
+    state = activeCpu(state);
+
+    const plan = chooseCpuDartPlan(state);
+
+    expect(plan?.target).toEqual({ ring: "double", number: 16 });
+    expect(plan?.outcome.name).toBe("Wire");
+    expect(plan?.techniques.map((item) => item.name)).toEqual(["Focus", "Focus"]);
+    const result = cpuTakeTurn(state);
+    expect(result.state.winner).toBe("cpu");
+  });
+
+  it("uses Checkout Nerve to turn a checkout Wire into a clean hit", () => {
+    let state = withScore(createGame(1), "cpu", 50);
+    state = withHand(state, "cpu", ["Wire", "Checkout Nerve", "Fat Segment"]);
+    state = activeCpu(state);
+
+    const plan = chooseCpuDartPlan(state);
+
+    expect(plan?.target).toEqual({ ring: "bull" });
+    expect(plan?.outcome.name).toBe("Wire");
+    expect(plan?.techniques.map((item) => item.name)).toEqual(["Checkout Nerve"]);
+    const result = cpuTakeTurn(state);
+    expect(result.state.winner).toBe("cpu");
+  });
+
   it("avoids an obvious bust when no legal checkout is available", () => {
     let state = withScore(createGame(1), "cpu", 41);
     state = withHand(state, "cpu", ["Clean Hit", "Fat Segment"]);
-    state = {
-      ...state,
-      activePlayerId: "cpu",
-      phase: "declare-target",
-      players: {
-        ...state.players,
-        cpu: { ...state.players.cpu, startOfVisitScore: 41 }
-      }
-    };
+    state = activeCpu(state);
 
     const result = cpuTakeTurn(state);
     expect(result.state.players.cpu.score).toBeGreaterThanOrEqual(0);
     expect(result.state.players.cpu.score).not.toBe(41);
+  });
+
+  it("prefers leaving a one-dart checkout over raw score when setting up", () => {
+    let state = withScore(createGame(1), "cpu", 61);
+    state = withHand(state, "cpu", ["Clean Hit"]);
+    state = activeCpu(state);
+
+    const plan = chooseCpuDartPlan(state);
+
+    expect(plan?.target).toEqual({ ring: "treble", number: 19 });
+  });
+
+  it("chooses the Drift direction that gives the player the worst result", () => {
+    let state = withScore(createGame(1), "player", 301);
+    state = withHand(state, "player", ["Clean Hit"]);
+    state = withHand(state, "cpu", ["Drift Left", "Drift Right"]);
+    state = declareTarget(state, { ring: "treble", number: 20 });
+    state = playOutcome(state, firstCardId(state, "player", "Clean Hit"));
+
+    expect(chooseCpuCounterplay(state)?.name).toBe("Drift Right");
+  });
+
+  it("does not waste Drift on low-impact player darts", () => {
+    let state = withScore(createGame(1), "player", 301);
+    state = withHand(state, "player", ["Clean Hit"]);
+    state = withHand(state, "cpu", ["Drift Right"]);
+    state = declareTarget(state, { ring: "single", number: 1 });
+    state = playOutcome(state, firstCardId(state, "player", "Clean Hit"));
+
+    expect(chooseCpuCounterplay(state)).toBeUndefined();
+  });
+
+  it("cancels player Drift with Safe Setup before Focus on important CPU darts", () => {
+    let state = withScore(createGame(1), "cpu", 60);
+    state = withHand(state, "cpu", ["Clean Hit", "Safe Setup", "Focus"]);
+    state = withHand(state, "player", ["Drift Right"]);
+    state = activeCpu(state);
+    state = declareTarget(state, { ring: "treble", number: 20 });
+    state = playOutcome(state, firstCardId(state, "cpu", "Clean Hit"));
+    state = playCounterplay(state, "player", firstCardId(state, "player", "Drift Right"));
+
+    expect(chooseCpuDriftCancel(state)?.name).toBe("Safe Setup");
+  });
+
+  it("discards CPU Technique cards when no Outcome cards are available", () => {
+    let state = withHand(createGame(1), "cpu", ["Focus", "Safe Setup", "Checkout Nerve", "Drift Left", "Drift Right"]);
+    state = {
+      ...activeCpu(state),
+      players: {
+        ...state.players,
+        cpu: {
+          ...state.players.cpu,
+          deck: [card("Clean Hit", "draw-clean")],
+          discard: []
+        }
+      }
+    };
+
+    expect(chooseCpuDartPlan(state)).toBeUndefined();
+    expect(chooseCpuTechniqueDiscards(state)).toHaveLength(3);
+    const result = cpuTakeTurn(state);
+    expect(result.state.players.cpu.hand.map((item) => item.name)).toContain("Clean Hit");
+    expect(result.state.activePlayerId).toBe("player");
+  });
+
+  it("does not loop forever when the CPU cannot make a throw", () => {
+    let state = withHand(createGame(1), "cpu", ["Focus", "Safe Setup", "Checkout Nerve"]);
+    state = activeCpu(state);
+
+    const result = cpuTakeTurn(state);
+
+    expect(result.state.activePlayerId).toBe("player");
+    expect(result.events.length).toBeLessThan(6);
   });
 });

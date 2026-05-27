@@ -2,6 +2,8 @@ import Phaser from "phaser";
 import {
   chooseCpuCounterplay,
   chooseCpuDart,
+  chooseCpuDriftCancel,
+  chooseCpuTechniqueDiscards,
   createGame,
   declareTarget,
   discardUnplayedTechniques,
@@ -1207,15 +1209,15 @@ export class PubGameScene extends Phaser.Scene {
     while (this.state.activePlayerId === "cpu" && this.state.phase !== "game-over") {
       const choice = chooseCpuDart(this.state);
       if (!choice) {
-        this.state = endVisit(this.state);
+        this.state = endVisit(this.state, { discardTechniqueCardIds: chooseCpuTechniqueDiscards(this.state) });
         break;
       }
       this.state = declareTarget(this.state, choice.target);
       this.refresh();
       await this.wait(1000);
       this.state = playOutcome(this.state, choice.outcome.id);
-      if (choice.focus) {
-        this.state = playTechnique(this.state, choice.focus.id);
+      for (const technique of choice.techniques) {
+        this.state = playTechnique(this.state, technique.id);
       }
       this.refresh();
       await this.wait(550);
@@ -1240,16 +1242,14 @@ export class PubGameScene extends Phaser.Scene {
   }
 
   private cpuRespondToDriftThenResolve() {
-    if (this.state.pendingDart?.counterplay && this.state.activePlayerId === "cpu") {
-      const safeSetup = this.state.players.cpu.hand.find((card) => card.name === "Safe Setup");
-      const target = this.state.pendingDart.target;
-      const score = targetScore(target);
-      const important = score >= 57 || score === this.state.players.cpu.score;
-      if (safeSetup && important) {
-        this.state = playTechnique(this.state, safeSetup.id);
-      }
+    const driftCancel = chooseCpuDriftCancel(this.state);
+    if (driftCancel) {
+      this.state = playTechnique(this.state, driftCancel.id);
     }
-    this.state = resolveDart(this.state);
+    this.state = resolveDart(this.state, {
+      discardTechniqueCardIds:
+        this.state.activePlayerId === "cpu" ? chooseCpuTechniqueDiscards(this.state) : undefined
+    });
     this.refresh();
     this.flashHit(this.state.lastDart?.finalTarget);
     if (this.state.activePlayerId === "cpu" && this.state.phase !== "game-over") {
