@@ -208,7 +208,7 @@ def build_pdf():
     cards = starter_deck("A") + starter_deck("B") + reference_cards()
 
     c = canvas.Canvas(OUT, pagesize=letter)
-    c.setTitle("Darts Deck-Builder Starter Card Set")
+    c.setTitle("Triple-twenty Starter Card Set")
     c.setAuthor("Codex")
 
     for page_start in range(0, len(cards), 9):
@@ -222,7 +222,7 @@ def build_pdf():
 
         c.setFont("Helvetica", 6.5)
         c.setFillColor(MUTED)
-        c.drawCentredString(PAGE_W / 2, 0.24 * inch, "Darts Deck-Builder starter set | Fronts only | Cut on card borders")
+        c.drawCentredString(PAGE_W / 2, 0.24 * inch, "Triple-twenty starter set | Fronts only | Cut on card borders")
         c.showPage()
 
     c.save()

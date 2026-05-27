@@ -1,4 +1,4 @@
-# Darts Deck-Builder: Prototype Rules
+# Triple-twenty: Prototype Rules
 
 A 2-player card game inspired by 501 darts. Players aim at dartboard segments, then use cards to determine where each dart actually lands.
 
