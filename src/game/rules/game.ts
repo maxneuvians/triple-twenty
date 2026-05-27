@@ -1,6 +1,7 @@
 import { createStarterDeck, isCounterplay, isOutcome, isTechnique } from "./cards";
 import { shuffle } from "./random";
 import {
+  doubleOf,
   driftTarget,
   isLegalCheckoutTarget,
   singleOf,
@@ -211,20 +212,16 @@ function canCheckout(active: PlayerState, target: Target): boolean {
   return isLegalCheckoutTarget(target) && targetScore(target) === active.score;
 }
 
-function focusedOutcomeName(state: GameState): CardName {
-  const outcome = state.pendingDart?.outcome?.name;
-  if (!outcome) throw new Error("No Outcome card has been played.");
-
-  let current = outcome;
-  const focusCount = state.pendingDart?.techniques.filter((card) => card.name === "Focus").length ?? 0;
-  for (let index = 0; index < focusCount; index += 1) {
-    if (current === "Wire") {
-      current = "Fat Segment";
-    } else if (current === "Fat Segment") {
-      current = "Clean Hit";
-    }
+function targetAfterFocus(target: Target, outcome: CardName, focusCount: number): Target | undefined {
+  if (outcome === "Wire") {
+    if (focusCount === 0) return undefined;
+    if (focusCount === 1) return singleOf(target);
+    return doubleOf(target);
   }
-  return current;
+  if (outcome === "Fat Segment") {
+    return focusCount > 0 ? doubleOf(target) : singleOf(target);
+  }
+  return target;
 }
 
 function computeFinalTarget(state: GameState): Target | undefined {
@@ -246,10 +243,8 @@ function computeFinalTarget(state: GameState): Target | undefined {
     return driftTarget(pending.target, pending.counterplay.name === "Drift Left" ? "left" : "right");
   }
 
-  const outcome = focusedOutcomeName(state);
-  if (outcome === "Wire") return undefined;
-  if (outcome === "Fat Segment") return singleOf(pending.target);
-  return pending.target;
+  const focusCount = pending.techniques.filter((card) => card.name === "Focus").length;
+  return targetAfterFocus(pending.target, pending.outcome.name, focusCount);
 }
 
 function finishVisit(state: GameState, options: { bust?: boolean } = {}): GameState {
@@ -274,6 +269,7 @@ function finishVisit(state: GameState, options: { bust?: boolean } = {}): GameSt
   const activeAfterScore = options.bust
     ? { ...active, score: active.startOfVisitScore }
     : active;
+  const visitTotal = options.bust ? 0 : Math.max(0, active.startOfVisitScore - active.score);
   const drawn = drawToHand({ ...activeAfterScore, dartsThrown: 0 }, nextSeed);
   players[activeId] = drawn.player;
   nextSeed = drawn.seed;
@@ -284,15 +280,17 @@ function finishVisit(state: GameState, options: { bust?: boolean } = {}): GameSt
     dartsThrown: 0
   };
 
+  const nextState: GameState = {
+    ...state,
+    players,
+    activePlayerId: nextActiveId,
+    phase: "declare-target",
+    pendingDart: undefined,
+    seed: nextSeed
+  };
+
   return appendLog(
-    {
-      ...state,
-      players,
-      activePlayerId: nextActiveId,
-      phase: "declare-target",
-      pendingDart: undefined,
-      seed: nextSeed
-    },
+    appendLog(nextState, `${players[activeId].label} visit total: ${visitTotal}.`),
     `${players[nextActiveId].label} steps to the oche.`
   );
 }
@@ -392,13 +390,7 @@ export function discardUnplayedTechniques(state: GameState, names: CardName[] = 
 }
 
 function predictedTarget(target: Target, outcome: CardName, useFocus: boolean): Target | undefined {
-  let effective = outcome;
-  if (useFocus && effective === "Wire") effective = "Fat Segment";
-  else if (useFocus && effective === "Fat Segment") effective = "Clean Hit";
-
-  if (effective === "Wire") return undefined;
-  if (effective === "Fat Segment") return singleOf(target);
-  return target;
+  return targetAfterFocus(target, outcome, useFocus ? 1 : 0);
 }
 
 function wouldBust(score: number, finalTarget: Target | undefined): boolean {

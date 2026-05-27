@@ -74,7 +74,7 @@ def starter_deck(deck_id):
             "Focus",
             "Technique",
             3,
-            "Improve one outcome: Wire -> Fat Segment; Fat Segment -> Clean Hit. In Counterplay Drift, cancel one Drift against your dart.",
+            "Improve one outcome: Wire -> Fat Segment; Fat Segment -> Double. In Counterplay Drift, cancel one Drift against your dart.",
             "Play after the Outcome card.",
         ),
         (

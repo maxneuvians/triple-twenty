@@ -11,7 +11,7 @@ import {
   playTechnique,
   resolveDart
 } from "./game";
-import { driftNumber, targetScore, targetForScore } from "./scoring";
+import { doubleOf, driftNumber, targetScore, targetForScore } from "./scoring";
 import type { CardName, GameState, PlayerId, Target } from "./types";
 
 function card(name: CardName, id: string = name): { id: string; name: CardName; kind: ReturnType<typeof cardKind> } {
@@ -81,6 +81,8 @@ describe("scoring helpers", () => {
     expect(targetForScore(40)).toEqual({ ring: "double", number: 20 });
     expect(targetForScore(50)).toEqual({ ring: "bull" });
     expect(targetForScore(41)).toBeUndefined();
+    expect(doubleOf({ ring: "treble", number: 20 })).toEqual({ ring: "double", number: 20 });
+    expect(doubleOf({ ring: "outerBull" })).toEqual({ ring: "bull" });
   });
 });
 
@@ -137,7 +139,7 @@ describe("dart resolution", () => {
     expect(state.lastDart?.score).toBe(0);
   });
 
-  it("uses Focus to improve Wire and Fat Segment", () => {
+  it("uses Focus to improve Wire and upgrade Fat Segment to a double", () => {
     let state = withHand(createGame(1), "player", ["Wire", "Fat Segment", "Focus", "Focus"]);
 
     state = throwDart(state, { ring: "treble", number: 20 }, "Wire", ["Focus"]);
@@ -147,7 +149,8 @@ describe("dart resolution", () => {
     state = playOutcome(state, firstCardId(state, "player", "Fat Segment"));
     state = playTechnique(state, firstCardId(state, "player", "Focus"));
     state = resolveDart(state);
-    expect(state.lastDart?.score).toBe(60);
+    expect(state.lastDart?.finalTarget).toEqual({ ring: "double", number: 20 });
+    expect(state.lastDart?.score).toBe(40);
   });
 
   it("lets Checkout Nerve turn a checkout Wire into Clean Hit", () => {
@@ -193,6 +196,15 @@ describe("visit and discard flow", () => {
 
     expect(state.activePlayerId).toBe("cpu");
     expect(state.players.cpu.startOfVisitScore).toBe(state.players.cpu.score);
+  });
+
+  it("logs the visit total before handing the oche to the next player", () => {
+    let state = withHand(createGame(1), "player", ["Clean Hit"]);
+    state = throwDart(state, { ring: "single", number: 20 }, "Clean Hit");
+    state = endVisit(state);
+
+    expect(state.log.at(-2)).toBe("Player visit total: 20.");
+    expect(state.log.at(-1)).toBe("CPU steps to the oche.");
   });
 });
 

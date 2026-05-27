@@ -393,15 +393,6 @@ const cardSpecs = [
 
 function drawCardTexture(canvas, x, y, w, h, base, accent) {
   fillRect(canvas, x, y, w, h, rgba(base, 255));
-  for (let yy = y + 2; yy < y + h; yy += 4) {
-    fillRect(canvas, x + 2, yy, w - 4, 1, rgba(0x000000, 34));
-  }
-  for (let xx = x + 4; xx < x + w - 4; xx += 13) {
-    for (let yy = y + 6; yy < y + h - 6; yy += 17) {
-      setPixel(canvas, xx, yy, rgba(accent, 95));
-      setPixel(canvas, xx + 1, yy + 1, rgba(0x000000, 45));
-    }
-  }
 }
 
 function drawCardFront(canvas, frame, spec) {

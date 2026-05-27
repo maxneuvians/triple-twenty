@@ -20,7 +20,9 @@ type CardView = {
   container: Phaser.GameObjects.Container;
   frame: Phaser.GameObjects.Sprite;
   glow: Phaser.GameObjects.Rectangle;
+  hitZone?: Phaser.GameObjects.Zone;
   playable: boolean;
+  selected: boolean;
 };
 
 type PixelButton = {
@@ -66,6 +68,15 @@ const cardTextColors: Record<CardName, CardColors> = {
   "Checkout Nerve": { label: "#1a1010", body: "#111510" }
 };
 
+const cpuPortraitKeys = [
+  "cpu-opponent",
+  "cpu-opponent-arthur",
+  "cpu-opponent-asha",
+  "cpu-opponent-jo",
+  "cpu-opponent-leon",
+  "cpu-opponent-viv"
+] as const;
+
 const boardCenter = { x: 470, y: 200 };
 const boardRadius = 138;
 const boardBackboardRadius = 162;
@@ -90,9 +101,12 @@ export class PubGameScene extends Phaser.Scene {
   private promptText!: Phaser.GameObjects.Text;
   private playerScoreText!: Phaser.GameObjects.Text;
   private playerMetaText!: Phaser.GameObjects.Text;
+  private playerLegText!: Phaser.GameObjects.Text;
   private checkoutText!: Phaser.GameObjects.Text;
+  private cpuPortrait?: Phaser.GameObjects.Image;
   private cpuScoreText!: Phaser.GameObjects.Text;
   private cpuMetaText!: Phaser.GameObjects.Text;
+  private cpuLegText!: Phaser.GameObjects.Text;
   private visitText!: Phaser.GameObjects.Text;
   private visitSlots: VisitSlot[] = [];
   private centerSignText!: Phaser.GameObjects.Text;
@@ -105,11 +119,23 @@ export class PubGameScene extends Phaser.Scene {
   private resultText!: Phaser.GameObjects.Text;
   private deckText!: Phaser.GameObjects.Text;
   private discardText!: Phaser.GameObjects.Text;
+  private deckPileBack!: Phaser.GameObjects.Container;
+  private discardPileBack!: Phaser.GameObjects.Container;
   private actionButton!: PixelButton;
   private discardButton!: PixelButton;
   private newGameButton!: PixelButton;
+  private driftAlert!: Phaser.GameObjects.Container;
+  private driftAlertPlate!: Phaser.GameObjects.Rectangle;
+  private driftAlertArrow!: Phaser.GameObjects.Text;
+  private driftAlertText!: Phaser.GameObjects.Text;
   private hoveredTarget?: Target;
   private hoveredCardId?: string;
+  private stagedOutcomeCardId?: string;
+  private stagedTechniqueCardIds = new Set<string>();
+  private driftNotice?: { text: string; direction?: "left" | "right"; expiresAt: number; fill?: number; border?: number };
+  private legsWon: Record<PlayerId, number> = { player: 0, cpu: 0 };
+  private countedWinner?: PlayerId;
+  private cpuPortraitKey: (typeof cpuPortraitKeys)[number] = "cpu-opponent";
   private waitingForPlayerDrift = false;
   private cpuRunning = false;
   private logScrollOffset = 0;
@@ -121,6 +147,7 @@ export class PubGameScene extends Phaser.Scene {
 
   create() {
     this.state = createGame(86);
+    this.chooseCpuPortrait();
     this.createPubBackdrop();
     this.createDartboard();
     this.createUiShell();
@@ -460,17 +487,17 @@ export class PubGameScene extends Phaser.Scene {
   private createUiShell() {
     this.playerScoreText = this.addText(36, 64, "", 60, "#e7bd54", true, 166, 72).setShadow(3, 3, "#000000", 0, false, true);
     this.playerMetaText = this.addText(36, 34, "PLAYER", 20, "#ff604a", true, 166, 22);
-    this.addText(38, 126, "LEG 1    SETS 0", 15, "#f2d18a", true, 158, 20);
+    this.playerLegText = this.addText(38, 126, "", 15, "#f2d18a", true, 158, 20);
     this.checkoutText = this.addText(36, 184, "", 18, "#f2d18a", true, 166, 40);
     this.addText(52, 288, "BULL\nFINISH\nSTRONG", 17, "#b8c45c", true, 118, 54);
 
     this.centerSignText = this.addText(692, 76, "301\nBEST OF\n5 LEGS", 24, "#e7bd54", true, 92, 112);
     this.addText(692, 50, "TONIGHT", 14, "#70b765", true, 92, 18);
 
-    this.add.image(1029, 86, "cpu-opponent").setDisplaySize(98, 98).setDepth(5);
+    this.cpuPortrait = this.add.image(1029, 86, this.cpuPortraitKey).setDisplaySize(98, 98).setDepth(5);
     this.cpuScoreText = this.addText(1112, 64, "", 54, "#e7bd54", true, 120, 66).setShadow(3, 3, "#000000", 0, false, true);
     this.cpuMetaText = this.addText(1112, 36, "CPU", 18, "#77b9da", true, 120, 24);
-    this.addText(1112, 126, "LEG 1  SETS 0", 14, "#77b9da", true, 126, 20);
+    this.cpuLegText = this.addText(1112, 126, "", 14, "#77b9da", true, 126, 20);
 
     this.visitText = this.addText(1014, 188, "", 20, "#e8c176", true, 92, 50);
     this.visitSlots = [0, 1, 2].map((index) => {
@@ -481,6 +508,36 @@ export class PubGameScene extends Phaser.Scene {
     });
 
     this.promptText = this.addText(1014, 316, "", 18, "#ffd166", true, 222, 54);
+    this.driftAlert = this.add.container(1012, 386).setDepth(10);
+    this.driftAlertPlate = this.add
+      .rectangle(0, 0, 228, 48, 0x541817, 0.92)
+      .setOrigin(0, 0)
+      .setStrokeStyle(3, 0xffd166, 0.95);
+    this.driftAlertArrow = this.add
+      .text(15, 5, ">>", {
+        fontFamily: "Courier New",
+        fontSize: "30px",
+        fontStyle: "bold",
+        color: "#ffd166",
+        fixedWidth: 48,
+        fixedHeight: 38,
+        align: "center"
+      })
+      .setOrigin(0, 0);
+    this.driftAlertText = this.add
+      .text(68, 7, "", {
+        fontFamily: "Courier New",
+        fontSize: "12px",
+        fontStyle: "bold",
+        color: "#f7e2b3",
+        fixedWidth: 142,
+        fixedHeight: 34,
+        align: "left",
+        wordWrap: { width: 142 }
+      })
+      .setOrigin(0, 0);
+    this.driftAlert.add([this.driftAlertPlate, this.driftAlertArrow, this.driftAlertText]);
+    this.driftAlert.setVisible(false);
     this.logStatusText = this.addText(720, 278, "", 11, "#77b9da", true, 194, 16);
     this.logText = this.addText(720, 300, "", 12, "#f7e2b3", false, 202, 76);
     this.logUpButton = this.makeButton(926, 304, 26, 24, "^", () => this.scrollLog(1));
@@ -489,6 +546,8 @@ export class PubGameScene extends Phaser.Scene {
 
     this.deckText = this.addText(1006, 464, "", 15, "#77b9da", true, 98, 28);
     this.discardText = this.addText(1136, 464, "", 15, "#a7a49b", true, 98, 28);
+    this.deckPileBack = this.createPileBack(1014, 508, 0x123f31);
+    this.discardPileBack = this.createPileBack(1144, 508, 0x4b3020);
 
     this.targetText = this.addText(84, 674, "", 18, "#ffd166", true, 230, 24);
     this.resultText = this.addText(326, 674, "", 16, "#70b765", true, 300, 24);
@@ -522,6 +581,30 @@ export class PubGameScene extends Phaser.Scene {
     g.fillTriangle(x + 8, y - 15, x + 2, y - 12, x + 2, y - 7);
   }
 
+  private createPileBack(x: number, y: number, fill: number): Phaser.GameObjects.Container {
+    const root = this.add.container(x, y).setDepth(6);
+    const width = 76;
+    const height = 104;
+    const shadow = this.add.rectangle(7, 5, width, height, 0x050606, 0.72).setOrigin(0, 0);
+    const offset = this.add.rectangle(4, 2, width, height, 0x101515, 1).setOrigin(0, 0).setStrokeStyle(2, 0x6c5a35, 0.85);
+    const back = this.add.rectangle(0, 0, width, height, fill, 1).setOrigin(0, 0).setStrokeStyle(3, 0xf2d18a, 1);
+    const inner = this.add.rectangle(8, 8, width - 16, height - 16, 0x0b1010, 0.18).setOrigin(0, 0).setStrokeStyle(1, 0xf2d18a, 0.5);
+    const band = this.add.rectangle(10, 40, width - 20, 24, 0x0b1010, 0.28).setOrigin(0, 0).setStrokeStyle(1, 0xf2d18a, 0.4);
+    const mark = this.add
+      .text(width / 2, height / 2, "20", {
+        fontFamily: "Courier New",
+        fontSize: "24px",
+        fontStyle: "bold",
+        color: "#f2d18a",
+        fixedWidth: width,
+        align: "center"
+      })
+      .setOrigin(0.5);
+    root.add([shadow, offset, back, inner, band, mark]);
+    root.setVisible(false);
+    return root;
+  }
+
   private addText(x: number, y: number, text: string, size: number, color: string, bold = false, width?: number, height?: number) {
     const style: Phaser.Types.GameObjects.Text.TextStyle = {
       fontFamily: "Courier New",
@@ -550,16 +633,18 @@ export class PubGameScene extends Phaser.Scene {
       })
       .setOrigin(0.5);
     root.add([plate, title]);
-    root.setSize(width, height);
-    root.setInteractive(new Phaser.Geom.Rectangle(0, 0, width, height), Phaser.Geom.Rectangle.Contains);
-    if (root.input) root.input.cursor = "pointer";
-    root.on("pointerover", () => plate.setFillStyle(0xf1cd70, 1));
-    root.on("pointerout", () => plate.setFillStyle(0xd2a94f, 0.95));
-    root.on("pointerdown", () => {
+    const hitZone = this.add.zone(x, y, width, height).setOrigin(0, 0).setDepth(32);
+    const enableHitZone = () => {
+      hitZone.setInteractive({ cursor: "pointer" });
+    };
+    enableHitZone();
+    hitZone.on("pointerover", () => plate.setFillStyle(0xf1cd70, 1));
+    hitZone.on("pointerout", () => plate.setFillStyle(0xd2a94f, 0.95));
+    hitZone.on("pointerdown", () => {
       plate.setFillStyle(0x9f6b2d, 1);
       onClick();
     });
-    root.on("pointerup", () => plate.setFillStyle(0xf1cd70, 1));
+    hitZone.on("pointerup", () => plate.setFillStyle(0xf1cd70, 1));
     return {
       root,
       plate,
@@ -567,6 +652,12 @@ export class PubGameScene extends Phaser.Scene {
       setText: (value: string) => title.setText(value),
       setVisible: (visible: boolean) => {
         root.setVisible(visible);
+        hitZone.setVisible(visible);
+        if (visible) {
+          enableHitZone();
+        } else {
+          hitZone.disableInteractive();
+        }
       },
       setAlpha: (alpha: number) => {
         root.setAlpha(alpha);
@@ -575,6 +666,8 @@ export class PubGameScene extends Phaser.Scene {
   }
 
   private refresh() {
+    this.syncStagedCardsWithState();
+    this.recordLegWin();
     if (!this.canChooseTarget()) {
       this.hoveredTarget = undefined;
     }
@@ -585,6 +678,8 @@ export class PubGameScene extends Phaser.Scene {
     this.cpuScoreText.setText(String(cpu.score));
     this.playerMetaText.setText("PLAYER");
     this.cpuMetaText.setText("CPU");
+    this.playerLegText.setText(`LEGS ${this.legsWon.player}   SETS 0`);
+    this.cpuLegText.setText(`LEGS ${this.legsWon.cpu}  SETS 0`);
     this.checkoutText.setText(`CHECKOUT\n${this.checkoutSuggestion(player.score)}`);
     this.visitText.setText(
       `VISIT\n${this.state.players[this.state.activePlayerId].dartsThrown + 1}/3`
@@ -596,12 +691,32 @@ export class PubGameScene extends Phaser.Scene {
     this.resultText.setText(`DART ${this.state.players[this.state.activePlayerId].dartsThrown + 1} OF 3  |  HIT: ${targetLabel(this.state.lastDart?.finalTarget)}`);
     this.deckText.setText(`DRAW DECK\n${player.deck.length}`);
     this.discardText.setText(`DISCARD\n${player.discard.length}`);
+    this.deckPileBack.setVisible(player.deck.length > 0);
+    this.discardPileBack.setVisible(player.discard.length > 0);
     this.promptText.setText(this.prompt());
+    this.updateDriftAlert();
     this.renderLog();
     this.actionButton.setText(this.primaryActionLabel());
     this.actionButton.setVisible(this.canUsePrimaryAction());
     this.discardButton.setVisible(this.state.activePlayerId === "player" && this.state.phase === "declare-target");
     this.renderHand();
+  }
+
+  private recordLegWin() {
+    if (this.state.phase !== "game-over" || !this.state.winner || this.countedWinner === this.state.winner) {
+      return;
+    }
+    this.legsWon = {
+      ...this.legsWon,
+      [this.state.winner]: this.legsWon[this.state.winner] + 1
+    };
+    this.countedWinner = this.state.winner;
+  }
+
+  private chooseCpuPortrait() {
+    const candidates = cpuPortraitKeys.filter((key) => key !== this.cpuPortraitKey);
+    this.cpuPortraitKey = Phaser.Utils.Array.GetRandom(candidates.length ? candidates : [...cpuPortraitKeys]);
+    this.cpuPortrait?.setTexture(this.cpuPortraitKey).setDisplaySize(98, 98);
   }
 
   private checkoutSuggestion(score: number): string {
@@ -649,6 +764,137 @@ export class PubGameScene extends Phaser.Scene {
     this.logDownButton.setAlpha(this.logScrollOffset > 0 ? 1 : 0.35);
   }
 
+  private syncStagedCardsWithState() {
+    if (this.state.activePlayerId !== "player" || this.state.phase !== "play-outcome") {
+      this.clearStagedCards();
+      return;
+    }
+
+    const handIds = new Set(this.state.players.player.hand.map((card) => card.id));
+    if (this.stagedOutcomeCardId && !handIds.has(this.stagedOutcomeCardId)) {
+      this.stagedOutcomeCardId = undefined;
+    }
+    if (!this.stagedOutcomeCardId) {
+      this.stagedTechniqueCardIds.clear();
+      return;
+    }
+    for (const cardId of [...this.stagedTechniqueCardIds]) {
+      if (!handIds.has(cardId)) this.stagedTechniqueCardIds.delete(cardId);
+    }
+  }
+
+  private clearStagedCards() {
+    this.stagedOutcomeCardId = undefined;
+    this.stagedTechniqueCardIds.clear();
+  }
+
+  private previewCpuCounterplay(): Card | undefined {
+    if (this.state.activePlayerId !== "player" || this.state.phase !== "play-outcome" || !this.stagedOutcomeCardId) {
+      return undefined;
+    }
+
+    try {
+      return chooseCpuCounterplay(playOutcome(this.state, this.stagedOutcomeCardId));
+    } catch {
+      return undefined;
+    }
+  }
+
+  private driftDirection(card: Card | undefined): "left" | "right" | undefined {
+    if (!card) return undefined;
+    if (card.name === "Drift Left") return "left";
+    if (card.name === "Drift Right") return "right";
+    return undefined;
+  }
+
+  private stagedDriftCancelCard(): Card | undefined {
+    return this.state.players.player.hand.find(
+      (card) => this.stagedTechniqueCardIds.has(card.id) && (card.name === "Focus" || card.name === "Safe Setup")
+    );
+  }
+
+  private showDriftNotice(card: Card, canceledBy?: Card) {
+    this.driftNotice = {
+      text: canceledBy ? `DRIFT CANCELED\nBY ${canceledBy.name.toUpperCase()}` : `CPU PLAYED\n${card.name.toUpperCase()}`,
+      direction: this.driftDirection(card),
+      expiresAt: this.time.now + 1750,
+      fill: canceledBy ? 0x143f2f : 0x541817,
+      border: canceledBy ? 0x9be2c1 : 0xffd166
+    };
+    this.updateDriftAlert();
+    this.tweens.killTweensOf(this.driftAlert);
+    this.driftAlert.setAlpha(1);
+    this.tweens.add({
+      targets: this.driftAlert,
+      alpha: { from: 1, to: 0.68 },
+      duration: 140,
+      yoyo: true,
+      repeat: 4,
+      ease: "Linear"
+    });
+    this.time.delayedCall(1800, () => {
+      if (this.driftNotice && this.time.now >= this.driftNotice.expiresAt) {
+        this.driftNotice = undefined;
+        this.updateDriftAlert();
+      }
+    });
+  }
+
+  private updateDriftAlert() {
+    if (this.driftNotice && this.time.now >= this.driftNotice.expiresAt) {
+      this.driftNotice = undefined;
+    }
+
+    let text = this.driftNotice?.text;
+    let direction = this.driftNotice?.direction;
+    let fill = this.driftNotice?.fill ?? 0x541817;
+    let border = this.driftNotice?.border ?? 0xffd166;
+
+    const activeCpuDrift =
+      this.state.activePlayerId === "player" && this.state.pendingDart?.counterplay
+        ? this.state.pendingDart.counterplay
+        : undefined;
+
+    if (!text && activeCpuDrift) {
+      direction = this.driftDirection(activeCpuDrift);
+      if (this.state.pendingDart?.counterplayCanceledBy) {
+        text = `DRIFT CANCELED\nBY ${this.state.pendingDart.counterplayCanceledBy.name.toUpperCase()}`;
+        fill = 0x143f2f;
+        border = 0x9be2c1;
+      } else {
+        text = `CPU PLAYED\n${activeCpuDrift.name.toUpperCase()}`;
+      }
+    }
+
+    if (!text) {
+      const preview = this.previewCpuCounterplay();
+      if (preview) {
+        direction = this.driftDirection(preview);
+        const cancelCard = this.stagedDriftCancelCard();
+        if (cancelCard) {
+          text = `DRIFT COVERED\nBY ${cancelCard.name.toUpperCase()}`;
+          fill = 0x143f2f;
+          border = 0x9be2c1;
+        } else {
+          text = `CPU READY\n${preview.name.toUpperCase()}`;
+          fill = 0x3b2210;
+          border = 0xffd166;
+        }
+      }
+    }
+
+    if (!text) {
+      this.driftAlert.setVisible(false);
+      return;
+    }
+
+    this.driftAlertPlate.setFillStyle(fill, 0.92);
+    this.driftAlertPlate.setStrokeStyle(3, border, 0.95);
+    this.driftAlertArrow.setText(direction === "left" ? "<<" : direction === "right" ? ">>" : "X");
+    this.driftAlertText.setText(text);
+    this.driftAlert.setVisible(true);
+  }
+
   private prompt(): string {
     if (this.state.phase === "game-over") {
       return `${this.state.players[this.state.winner ?? "player"].label.toUpperCase()} WINS THE LEG`;
@@ -656,12 +902,19 @@ export class PubGameScene extends Phaser.Scene {
     if (this.waitingForPlayerDrift) return "CPU has thrown. Play Drift now, or skip.";
     if (this.state.activePlayerId === "cpu") return "CPU at the oche...";
     if (this.state.phase === "declare-target") return "Click the board to declare a target.";
+    if (this.state.phase === "play-outcome" && this.stagedOutcomeCardId) {
+      if (this.previewCpuCounterplay()) {
+        return this.stagedDriftCancelCard() ? "Drift covered. Throw when ready." : "CPU Drift ready. Pick Focus/Safe Setup or throw.";
+      }
+      return "Select Technique cards, then throw.";
+    }
     if (this.state.phase === "play-outcome") return "Play one Outcome card.";
     return "Play Technique cards, then throw.";
   }
 
   private renderHand() {
     for (const view of this.handViews) {
+      view.hitZone?.destroy();
       view.container.destroy(true);
     }
     this.handViews = [];
@@ -672,12 +925,15 @@ export class PubGameScene extends Phaser.Scene {
     hand.forEach((card, index) => {
       const x = startX + index * 174;
       const playable = this.isCardPlayable(card);
+      const selected = this.isCardStaged(card);
       const colors = cardTextColors[card.name];
-      const container = this.add.container(x, y).setDepth(9);
+      const cardY = selected ? y - 18 : y;
+      const container = this.add.container(x, cardY).setDepth(selected ? 11 : 9);
+      const glowColor = selected ? 0x9be2c1 : 0xffd166;
       const glow = this.add
-        .rectangle(-5, -5, cardWidth + 10, cardHeight + 10, 0xffd166, playable ? 0.06 : 0)
+        .rectangle(-5, -5, cardWidth + 10, cardHeight + 10, glowColor, selected ? 0.2 : playable ? 0.06 : 0)
         .setOrigin(0, 0)
-        .setStrokeStyle(playable ? 2 : 0, 0xffd166, playable ? 0.65 : 0);
+        .setStrokeStyle(playable || selected ? 2 : 0, glowColor, selected ? 0.95 : playable ? 0.65 : 0);
       const frame = this.add.sprite(0, 0, "card-fronts", cardFrontFrameByCard[card.name]).setOrigin(0, 0);
       const title = this.add
         .text(18, 20, card.name.toUpperCase(), {
@@ -703,13 +959,20 @@ export class PubGameScene extends Phaser.Scene {
         })
         .setOrigin(0, 0);
       container.add([glow, frame, title, body]);
+      let hitZone: Phaser.GameObjects.Zone | undefined;
       if (playable) {
-        container.setSize(cardWidth, cardHeight);
-        container.setInteractive(new Phaser.Geom.Rectangle(0, 0, cardWidth, cardHeight), Phaser.Geom.Rectangle.Contains);
-        if (container.input) container.input.cursor = "pointer";
-        container.on("pointerdown", () => this.playCard(card));
+        hitZone = this.add.zone(x, cardY, cardWidth, cardHeight).setOrigin(0, 0).setDepth(31);
+        hitZone.setInteractive({ cursor: "pointer" });
+        hitZone.on("pointerover", () => {
+          this.hoveredCardId = card.id;
+          this.applyCardHover();
+        });
+        hitZone.on("pointerout", () => {
+          if (this.hoveredCardId === card.id) this.clearCardHover();
+        });
+        hitZone.on("pointerdown", () => this.playCard(card));
       }
-      this.handViews.push({ card, container, frame, glow, playable });
+      this.handViews.push({ card, container, frame, glow, hitZone, playable, selected });
     });
     this.syncCardHover();
   }
@@ -723,6 +986,8 @@ export class PubGameScene extends Phaser.Scene {
 
   private isPointerOverCard(view: CardView, pointer: Phaser.Input.Pointer): boolean {
     if (!view.playable) return false;
+    const hitBounds = view.hitZone?.getBounds();
+    if (hitBounds) return hitBounds.contains(pointer.x, pointer.y);
     const localX = pointer.x - view.container.x;
     const localY = pointer.y - view.container.y;
     return localX >= 0 && localX <= cardWidth && localY >= 0 && localY <= cardHeight;
@@ -737,7 +1002,7 @@ export class PubGameScene extends Phaser.Scene {
   private applyCardHover() {
     for (const view of this.handViews) {
       const hovered = view.card.id === this.hoveredCardId;
-      view.glow.setAlpha(hovered ? 0.28 : view.playable ? 0.06 : 0);
+      view.glow.setAlpha(hovered ? 0.32 : view.selected ? 0.2 : view.playable ? 0.06 : 0);
       if (hovered) {
         view.frame.setTint(0xfff1a3);
       } else {
@@ -766,18 +1031,24 @@ export class PubGameScene extends Phaser.Scene {
       "Drift Left": "Counter left.",
       "Drift Right": "Counter right.",
       Wire: "Score 0.",
-      Focus: "Improve/cancel Drift.",
+      Focus: "Wire->fat, fat->double.",
       "Safe Setup": "Cancel Drift.",
       "Checkout Nerve": "Save checkout."
     };
     return hints[name];
   }
 
+  private isCardStaged(card: Card): boolean {
+    return this.stagedOutcomeCardId === card.id || this.stagedTechniqueCardIds.has(card.id);
+  }
+
   private isCardPlayable(card: Card): boolean {
     if (this.state.phase === "game-over") return false;
     if (this.waitingForPlayerDrift) return isCounterplay(card);
     if (this.state.activePlayerId !== "player") return false;
-    if (this.state.phase === "play-outcome") return isOutcome(card);
+    if (this.state.phase === "play-outcome") {
+      return isOutcome(card) || (Boolean(this.stagedOutcomeCardId) && isTechnique(card));
+    }
     if (this.state.phase === "technique-window") return isTechnique(card);
     return false;
   }
@@ -790,12 +1061,30 @@ export class PubGameScene extends Phaser.Scene {
       return;
     }
 
+    if (this.state.activePlayerId === "player" && this.state.phase === "play-outcome") {
+      if (isOutcome(card)) {
+        if (this.stagedOutcomeCardId === card.id) {
+          this.clearStagedCards();
+        } else {
+          this.stagedOutcomeCardId = card.id;
+        }
+        this.refresh();
+        return;
+      }
+
+      if (this.stagedOutcomeCardId && isTechnique(card)) {
+        if (this.stagedTechniqueCardIds.has(card.id)) {
+          this.stagedTechniqueCardIds.delete(card.id);
+        } else {
+          this.stagedTechniqueCardIds.add(card.id);
+        }
+        this.refresh();
+        return;
+      }
+    }
+
     if (this.state.phase === "play-outcome") {
       this.state = playOutcome(this.state, card.id);
-      const counter = chooseCpuCounterplay(this.state);
-      if (counter) {
-        this.state = playCounterplay(this.state, "cpu", counter.id);
-      }
     } else if (this.state.phase === "technique-window") {
       this.state = playTechnique(this.state, card.id);
     }
@@ -803,7 +1092,12 @@ export class PubGameScene extends Phaser.Scene {
   }
 
   private canResolvePlayerDart(): boolean {
-    return this.state.activePlayerId === "player" && this.state.phase === "technique-window" && !this.cpuRunning;
+    return (
+      this.state.activePlayerId === "player" &&
+      !this.cpuRunning &&
+      (this.state.phase === "technique-window" ||
+        (this.state.phase === "play-outcome" && Boolean(this.stagedOutcomeCardId)))
+    );
   }
 
   private canUsePrimaryAction(): boolean {
@@ -831,6 +1125,7 @@ export class PubGameScene extends Phaser.Scene {
       this.state.phase === "declare-target" &&
       this.state.players.player.dartsThrown > 0
     ) {
+      this.clearStagedCards();
       this.state = endVisit(this.state);
       this.refresh();
       if (this.state.activePlayerId === "cpu" && this.state.phase !== "game-over") {
@@ -841,31 +1136,69 @@ export class PubGameScene extends Phaser.Scene {
 
   private resolvePlayerDart() {
     if (!this.canResolvePlayerDart()) return;
+    const drift = this.commitStagedPlayerCards();
+    if (!this.state.pendingDart?.outcome) return;
     this.state = resolveDart(this.state);
     this.refresh();
+    if (drift.card) this.showDriftNotice(drift.card, drift.canceledBy);
     this.flashHit(this.state.lastDart?.finalTarget);
     if (this.state.activePlayerId === "cpu" && this.state.phase !== "game-over") {
       this.time.delayedCall(950, () => void this.runCpuVisit());
     }
   }
 
+  private commitStagedPlayerCards(): { card?: Card; canceledBy?: Card } {
+    if (this.state.activePlayerId !== "player" || this.state.phase !== "play-outcome") {
+      return {};
+    }
+    if (!this.stagedOutcomeCardId) return {};
+    if (!this.state.players.player.hand.some((card) => card.id === this.stagedOutcomeCardId)) {
+      this.clearStagedCards();
+      return {};
+    }
+
+    let next = playOutcome(this.state, this.stagedOutcomeCardId);
+    const counter = chooseCpuCounterplay(next);
+    let driftCard: Card | undefined;
+    if (counter) {
+      driftCard = counter;
+      next = playCounterplay(next, "cpu", counter.id);
+    }
+
+    for (const cardId of [...this.stagedTechniqueCardIds]) {
+      if (next.players.player.hand.some((card) => card.id === cardId)) {
+        next = playTechnique(next, cardId);
+      }
+    }
+
+    this.clearStagedCards();
+    this.state = next;
+    return { card: driftCard, canceledBy: next.pendingDart?.counterplayCanceledBy };
+  }
+
   private discardTechniques() {
     if (this.state.activePlayerId !== "player" || this.state.phase !== "declare-target") return;
+    this.clearStagedCards();
     this.state = discardUnplayedTechniques(this.state);
     this.refresh();
   }
 
   private newGame() {
+    this.clearStagedCards();
     this.waitingForPlayerDrift = false;
     this.cpuRunning = false;
+    this.driftNotice = undefined;
+    this.countedWinner = undefined;
     this.logScrollOffset = 0;
     this.hitFlash.clear();
     this.state = createGame(Math.floor(Date.now() % 100000));
+    this.chooseCpuPortrait();
     this.refresh();
   }
 
   private async runCpuVisit() {
     if (this.cpuRunning) return;
+    this.clearStagedCards();
     this.cpuRunning = true;
     while (this.state.activePlayerId === "cpu" && this.state.phase !== "game-over") {
       const choice = chooseCpuDart(this.state);

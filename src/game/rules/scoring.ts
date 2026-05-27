@@ -19,6 +19,13 @@ export function singleOf(target: Target): Target {
   return { ring: "single", number: target.number };
 }
 
+export function doubleOf(target: Target): Target {
+  if (target.ring === "bull" || target.ring === "outerBull") {
+    return { ring: "bull" };
+  }
+  return { ring: "double", number: target.number };
+}
+
 export function driftNumber(number: DartNumber, direction: "left" | "right"): DartNumber {
   const index = dartboardOrder.indexOf(number);
   if (index < 0) {

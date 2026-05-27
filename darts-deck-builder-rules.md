@@ -164,7 +164,7 @@ Technique cards modify outcomes. They are optional.
 Focus
 Improve one outcome:
 Wire -> Fat Segment
-Fat Segment -> Clean Hit
+Fat Segment -> Double
 In the Counterplay Drift variant, cancel one Drift card played against your dart.
 ```
 
@@ -248,9 +248,9 @@ Dart 1:
 ```text
 Aim: T20
 Play: Fat Segment + Focus
-Result: Focus improves Fat Segment to Clean Hit.
-Score: T20 = 60
-New total: 36
+Result: Focus improves Fat Segment to D20.
+Score: D20 = 40
+New total: 56
 ```
 
 Dart 2:
