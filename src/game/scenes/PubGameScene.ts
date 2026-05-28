@@ -13,6 +13,7 @@ import {
   playTechnique,
   resolveDart
 } from "../rules/game";
+import { playerGuideSections, type PlayerGuideSection } from "../content/playerGuide";
 import { dartboardOrder, type Card, type CardName, type GameState, type PlayerId, type Target } from "../rules/types";
 import { isCounterplay, isOutcome, isTechnique } from "../rules/cards";
 import { targetForScore, targetLabel, targetScore } from "../rules/scoring";
@@ -31,9 +32,11 @@ type PixelButton = {
   root: Phaser.GameObjects.Container;
   plate: Phaser.GameObjects.Rectangle;
   title: Phaser.GameObjects.Text;
+  hitZone: Phaser.GameObjects.Zone;
   setText: (text: string) => void;
   setVisible: (visible: boolean) => void;
   setAlpha: (alpha: number) => void;
+  destroy: () => void;
 };
 
 type VisitSlot = {
@@ -44,6 +47,18 @@ type VisitSlot = {
 type CardColors = {
   label: string;
   body: string;
+};
+
+type GuideModal = {
+  root: Phaser.GameObjects.Container;
+  tabButtons: PixelButton[];
+  prevButton: PixelButton;
+  nextButton: PixelButton;
+  closeButton: PixelButton;
+  titleText: Phaser.GameObjects.Text;
+  subtitleText: Phaser.GameObjects.Text;
+  bodyText: Phaser.GameObjects.Text;
+  pageText: Phaser.GameObjects.Text;
 };
 
 const cardWidth = 156;
@@ -124,8 +139,11 @@ export class PubGameScene extends Phaser.Scene {
   private deckPileBack!: Phaser.GameObjects.Container;
   private discardPileBack!: Phaser.GameObjects.Container;
   private actionButton!: PixelButton;
+  private guideButton!: PixelButton;
   private discardButton!: PixelButton;
   private newGameButton!: PixelButton;
+  private guideModal?: GuideModal;
+  private guideSectionIndex = 0;
   private driftAlert!: Phaser.GameObjects.Container;
   private driftAlertPlate!: Phaser.GameObjects.Rectangle;
   private driftAlertArrow!: Phaser.GameObjects.Text;
@@ -153,6 +171,7 @@ export class PubGameScene extends Phaser.Scene {
     this.createPubBackdrop();
     this.createDartboard();
     this.createUiShell();
+    this.input.keyboard?.on("keydown-ESC", () => this.closeGuide());
     this.refresh();
   }
 
@@ -192,13 +211,7 @@ export class PubGameScene extends Phaser.Scene {
     const zone = this.add.zone(boardCenter.x, boardCenter.y, boardBackboardRadius * 2, boardBackboardRadius * 2);
     zone.setInteractive({ cursor: "crosshair" });
     zone.on("pointerdown", (pointer: Phaser.Input.Pointer) => {
-      if (
-        this.state.activePlayerId !== "player" ||
-        (this.state.phase !== "declare-target" && this.state.phase !== "play-outcome") ||
-        this.cpuRunning
-      ) {
-        return;
-      }
+      if (!this.canChooseTarget()) return;
       const target = this.targetFromPoint(pointer.x, pointer.y);
       if (!target) return;
       this.state = declareTarget(this.state, target);
@@ -473,7 +486,8 @@ export class PubGameScene extends Phaser.Scene {
     return (
       this.state.activePlayerId === "player" &&
       (this.state.phase === "declare-target" || this.state.phase === "play-outcome") &&
-      !this.cpuRunning
+      !this.cpuRunning &&
+      !this.isGuideOpen()
     );
   }
 
@@ -560,14 +574,22 @@ export class PubGameScene extends Phaser.Scene {
     this.input.on(
       "wheel",
       (pointer: Phaser.Input.Pointer, _gameObjects: Phaser.GameObjects.GameObject[], _deltaX: number, deltaY: number) => {
+        if (this.isGuideOpen()) return;
         if (this.isInsideLogZone(pointer.x, pointer.y)) {
           this.scrollLog(deltaY < 0 ? 1 : -1);
         }
       }
     );
-    this.input.on("pointermove", (pointer: Phaser.Input.Pointer) => this.syncCardHover(pointer));
+    this.input.on("pointermove", (pointer: Phaser.Input.Pointer) => {
+      if (this.isGuideOpen()) {
+        this.clearCardHover();
+        return;
+      }
+      this.syncCardHover(pointer);
+    });
     this.input.on("gameout", () => this.clearCardHover());
     this.actionButton = this.makeButton(684, 674, 174, 30, "THROW DART", () => this.primaryAction());
+    this.guideButton = this.makeButton(872, 674, 86, 30, "GUIDE", () => this.openGuide());
     this.discardButton = this.makeButton(1004, 674, 102, 30, "DISCARD", () => this.discardTechniques());
     this.newGameButton = this.makeButton(1120, 674, 124, 30, "NEW LEG", () => this.newGame());
   }
@@ -655,6 +677,7 @@ export class PubGameScene extends Phaser.Scene {
       root,
       plate,
       title,
+      hitZone,
       setText: (value: string) => title.setText(value),
       setVisible: (visible: boolean) => {
         root.setVisible(visible);
@@ -667,8 +690,177 @@ export class PubGameScene extends Phaser.Scene {
       },
       setAlpha: (alpha: number) => {
         root.setAlpha(alpha);
+      },
+      destroy: () => {
+        hitZone.destroy();
+        root.destroy(true);
       }
     };
+  }
+
+  private isGuideOpen(): boolean {
+    return Boolean(this.guideModal);
+  }
+
+  private openGuide() {
+    if (this.guideModal) return;
+    this.guideSectionIndex = 0;
+    this.clearCardHover();
+    this.hoveredTarget = undefined;
+    this.drawBoard(this.state.pendingDart?.target);
+    this.createGuideModal();
+    this.renderGuideModal();
+  }
+
+  private closeGuide() {
+    if (!this.guideModal) return;
+    const modal = this.guideModal;
+    for (const button of modal.tabButtons) button.destroy();
+    modal.prevButton.destroy();
+    modal.nextButton.destroy();
+    modal.closeButton.destroy();
+    modal.root.destroy(true);
+    this.guideModal = undefined;
+    this.refresh();
+  }
+
+  private createGuideModal() {
+    const panel = { x: 150, y: 80, width: 980, height: 560 };
+    const root = this.add.container(0, 0).setDepth(70);
+    const backdrop = this.add
+      .rectangle(0, 0, 1280, 720, 0x050303, 0.72)
+      .setOrigin(0, 0)
+      .setInteractive({ cursor: "default" });
+    backdrop.on("pointerdown", (pointer: Phaser.Input.Pointer) => {
+      if (!this.isPointInsideGuidePanel(pointer.x, pointer.y)) this.closeGuide();
+    });
+
+    const shadow = this.add.rectangle(panel.x + 10, panel.y + 10, panel.width, panel.height, 0x050303, 0.7).setOrigin(0, 0);
+    const paper = this.add.rectangle(panel.x, panel.y, panel.width, panel.height, 0xcaa463, 1).setOrigin(0, 0).setStrokeStyle(4, 0x2a140b, 1);
+    const inner = this.add.rectangle(panel.x + 16, panel.y + 16, panel.width - 32, panel.height - 32, 0xf1d8a4, 1).setOrigin(0, 0).setStrokeStyle(3, 0x6d3f1f, 1);
+    const header = this.add.rectangle(panel.x + 30, panel.y + 28, panel.width - 60, 72, 0x24140d, 0.96).setOrigin(0, 0).setStrokeStyle(2, 0xd2a94f, 1);
+    const blocker = this.add.zone(panel.x, panel.y, panel.width, panel.height).setOrigin(0, 0).setInteractive({ cursor: "default" });
+    const titleText = this.add
+      .text(panel.x + 56, panel.y + 36, "", {
+        fontFamily: "Courier New",
+        fontSize: "32px",
+        fontStyle: "bold",
+        color: "#f2d18a",
+        fixedWidth: 540,
+        fixedHeight: 38
+      })
+      .setOrigin(0, 0);
+    const subtitleText = this.add
+      .text(panel.x + 58, panel.y + 75, "", {
+        fontFamily: "Courier New",
+        fontSize: "14px",
+        fontStyle: "bold",
+        color: "#9be2c1",
+        fixedWidth: 620,
+        fixedHeight: 20
+      })
+      .setOrigin(0, 0);
+    const menuTitle = this.add
+      .text(panel.x + 716, panel.y + 42, "MATCH\nMENU", {
+        fontFamily: "Courier New",
+        fontSize: "22px",
+        fontStyle: "bold",
+        color: "#f7e2b3",
+        fixedWidth: 150,
+        fixedHeight: 52,
+        align: "center"
+      })
+      .setOrigin(0, 0);
+    const bodyText = this.add
+      .text(panel.x + 62, panel.y + 176, "", {
+        fontFamily: "Courier New",
+        fontSize: "15px",
+        fontStyle: "bold",
+        color: "#1a1010",
+        fixedWidth: 850,
+        fixedHeight: 305,
+        wordWrap: { width: 850 }
+      })
+      .setOrigin(0, 0)
+      .setLineSpacing(5);
+    const pageText = this.add
+      .text(panel.x + 430, panel.y + 505, "", {
+        fontFamily: "Courier New",
+        fontSize: "14px",
+        fontStyle: "bold",
+        color: "#3b2210",
+        fixedWidth: 120,
+        fixedHeight: 24,
+        align: "center"
+      })
+      .setOrigin(0, 0);
+
+    root.add([backdrop, shadow, paper, inner, header, blocker, titleText, subtitleText, menuTitle, bodyText, pageText]);
+
+    const tabButtons = playerGuideSections.map((section, index) => {
+      const button = this.makeButton(panel.x + 58 + index * 118, panel.y + 122, 104, 30, section.id, () => this.showGuideSection(index));
+      this.raiseButton(button, 82);
+      return button;
+    });
+    const prevButton = this.makeButton(panel.x + 240, panel.y + 502, 126, 30, "PREV", () => this.cycleGuide(-1));
+    const nextButton = this.makeButton(panel.x + 612, panel.y + 502, 126, 30, "NEXT", () => this.cycleGuide(1));
+    const closeButton = this.makeButton(panel.x + panel.width - 72, panel.y + 32, 42, 30, "X", () => this.closeGuide());
+    this.raiseButton(prevButton, 82);
+    this.raiseButton(nextButton, 82);
+    this.raiseButton(closeButton, 82);
+
+    this.guideModal = {
+      root,
+      tabButtons,
+      prevButton,
+      nextButton,
+      closeButton,
+      titleText,
+      subtitleText,
+      bodyText,
+      pageText
+    };
+  }
+
+  private raiseButton(button: PixelButton, depth: number) {
+    button.root.setDepth(depth);
+    button.hitZone.setDepth(depth + 1);
+  }
+
+  private isPointInsideGuidePanel(x: number, y: number): boolean {
+    return x >= 150 && x <= 1130 && y >= 80 && y <= 640;
+  }
+
+  private showGuideSection(index: number) {
+    this.guideSectionIndex = Phaser.Math.Wrap(index, 0, playerGuideSections.length);
+    this.renderGuideModal();
+  }
+
+  private cycleGuide(delta: number) {
+    this.showGuideSection(this.guideSectionIndex + delta);
+  }
+
+  private renderGuideModal() {
+    const modal = this.guideModal;
+    if (!modal) return;
+    const section = playerGuideSections[this.guideSectionIndex];
+    modal.titleText.setText(`TRIPLE-TWENTY ${section.title.toUpperCase()}`);
+    modal.subtitleText.setText(section.subtitle);
+    modal.bodyText.setText(this.formatGuideSection(section));
+    modal.pageText.setText(`${this.guideSectionIndex + 1} / ${playerGuideSections.length}`);
+
+    modal.tabButtons.forEach((button, index) => {
+      const selected = index === this.guideSectionIndex;
+      button.plate.setFillStyle(selected ? 0xf1cd70 : 0x5e3c24, 1);
+      button.plate.setStrokeStyle(2, selected ? 0x1a1010 : 0xd2a94f, 1);
+      button.title.setColor(selected ? "#1a1010" : "#f7e2b3");
+    });
+  }
+
+  private formatGuideSection(section: PlayerGuideSection): string {
+    return section.blocks
+      .map((block) => `${block.heading.toUpperCase()}\n${block.items.map((item) => `- ${item}`).join("\n")}`)
+      .join("\n\n");
   }
 
   private refresh() {
@@ -704,6 +896,7 @@ export class PubGameScene extends Phaser.Scene {
     this.renderLog();
     this.actionButton.setText(this.primaryActionLabel());
     this.actionButton.setVisible(this.canUsePrimaryAction());
+    this.guideButton.setVisible(true);
     this.discardButton.setVisible(this.state.activePlayerId === "player" && this.state.phase === "declare-target");
     this.renderHand();
   }
@@ -984,6 +1177,10 @@ export class PubGameScene extends Phaser.Scene {
   }
 
   private syncCardHover(pointer = this.input.activePointer) {
+    if (this.isGuideOpen()) {
+      this.clearCardHover();
+      return;
+    }
     const next = this.handViews.find((view) => this.isPointerOverCard(view, pointer))?.card.id;
     if (next === this.hoveredCardId) return;
     this.hoveredCardId = next;
@@ -1049,6 +1246,7 @@ export class PubGameScene extends Phaser.Scene {
   }
 
   private isCardPlayable(card: Card): boolean {
+    if (this.isGuideOpen()) return false;
     if (this.state.phase === "game-over") return false;
     if (this.waitingForPlayerDrift) return isCounterplay(card);
     if (this.state.activePlayerId !== "player") return false;
@@ -1060,6 +1258,7 @@ export class PubGameScene extends Phaser.Scene {
   }
 
   private playCard(card: Card) {
+    if (this.isGuideOpen()) return;
     if (this.waitingForPlayerDrift) {
       this.state = playCounterplay(this.state, "player", card.id);
       this.waitingForPlayerDrift = false;
@@ -1101,6 +1300,7 @@ export class PubGameScene extends Phaser.Scene {
     return (
       this.state.activePlayerId === "player" &&
       !this.cpuRunning &&
+      !this.isGuideOpen() &&
       (this.state.phase === "technique-window" ||
         (this.state.phase === "play-outcome" && Boolean(this.stagedOutcomeCardId)))
     );
@@ -1112,7 +1312,8 @@ export class PubGameScene extends Phaser.Scene {
       (this.state.activePlayerId === "player" &&
         this.state.phase === "declare-target" &&
         this.state.players.player.dartsThrown > 0 &&
-        !this.cpuRunning)
+        !this.cpuRunning &&
+        !this.isGuideOpen())
     );
   }
 
@@ -1122,6 +1323,7 @@ export class PubGameScene extends Phaser.Scene {
   }
 
   private primaryAction() {
+    if (this.isGuideOpen()) return;
     if (this.canResolvePlayerDart()) {
       this.resolvePlayerDart();
       return;
@@ -1183,6 +1385,7 @@ export class PubGameScene extends Phaser.Scene {
   }
 
   private discardTechniques() {
+    if (this.isGuideOpen()) return;
     if (this.state.activePlayerId !== "player" || this.state.phase !== "declare-target") return;
     this.clearStagedCards();
     this.state = discardUnplayedTechniques(this.state);
@@ -1190,6 +1393,7 @@ export class PubGameScene extends Phaser.Scene {
   }
 
   private newGame() {
+    if (this.isGuideOpen()) return;
     this.clearStagedCards();
     this.waitingForPlayerDrift = false;
     this.cpuRunning = false;
