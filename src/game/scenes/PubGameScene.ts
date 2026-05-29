@@ -14,6 +14,7 @@ import {
   resolveDart
 } from "../rules/game";
 import { playerGuideSections, type PlayerGuideSection } from "../content/playerGuide";
+import { pubLocations } from "../content/pubLocations";
 import { dartboardOrder, type Card, type CardName, type GameState, type PlayerId, type Target } from "../rules/types";
 import { isCounterplay, isOutcome, isTechnique } from "../rules/cards";
 import { targetForScore, targetLabel, targetScore } from "../rules/scoring";
@@ -111,6 +112,7 @@ const boardRings = {
 
 export class PubGameScene extends Phaser.Scene {
   private state!: GameState;
+  private pubBackground!: Phaser.GameObjects.Image;
   private board!: Phaser.GameObjects.Graphics;
   private hitFlash!: Phaser.GameObjects.Graphics;
   private boardLabels: Phaser.GameObjects.Text[] = [];
@@ -142,6 +144,7 @@ export class PubGameScene extends Phaser.Scene {
   private guideButton!: PixelButton;
   private discardButton!: PixelButton;
   private newGameButton!: PixelButton;
+  private venueButton!: PixelButton;
   private guideModal?: GuideModal;
   private guideSectionIndex = 0;
   private driftAlert!: Phaser.GameObjects.Container;
@@ -155,6 +158,7 @@ export class PubGameScene extends Phaser.Scene {
   private driftNotice?: { text: string; direction?: "left" | "right"; expiresAt: number; fill?: number; border?: number };
   private legsWon: Record<PlayerId, number> = { player: 0, cpu: 0 };
   private countedWinner?: PlayerId;
+  private pubLocationIndex = 0;
   private cpuPortraitKey: (typeof cpuPortraitKeys)[number] = "cpu-opponent";
   private waitingForPlayerDrift = false;
   private cpuRunning = false;
@@ -180,7 +184,7 @@ export class PubGameScene extends Phaser.Scene {
   }
 
   private createPubBackdrop() {
-    this.add.image(640, 360, "pub-room").setDisplaySize(1280, 720).setDepth(0);
+    this.pubBackground = this.add.image(640, 360, this.currentPubLocation().assetKey).setDisplaySize(1280, 720).setDepth(0);
     this.add.rectangle(640, 360, 1280, 720, 0x000000, 0.1).setDepth(1);
     this.add.image(640, 360, "ui-panels").setDepth(4);
 
@@ -511,8 +515,9 @@ export class PubGameScene extends Phaser.Scene {
     this.checkoutText = this.addText(36, 184, "", 18, "#f2d18a", true, 166, 40);
     this.addText(52, 288, "BULL\nFINISH\nSTRONG", 17, "#b8c45c", true, 118, 54);
 
-    this.centerSignText = this.addText(692, 76, "301\nBEST OF\n5 LEGS", 24, "#e7bd54", true, 92, 112);
+    this.centerSignText = this.addText(686, 76, "", 19, "#e7bd54", true, 116, 100);
     this.addText(692, 50, "TONIGHT", 14, "#70b765", true, 92, 18);
+    this.venueButton = this.makeButton(692, 184, 92, 26, "VENUE", () => this.cyclePubLocation());
 
     this.cpuPortrait = this.add.image(1029, 86, this.cpuPortraitKey).setDisplaySize(98, 98).setDepth(5);
     this.cpuScoreText = this.addText(1112, 64, "", 54, "#e7bd54", true, 120, 66).setShadow(3, 3, "#000000", 0, false, true);
@@ -592,6 +597,17 @@ export class PubGameScene extends Phaser.Scene {
     this.guideButton = this.makeButton(872, 674, 86, 30, "GUIDE", () => this.openGuide());
     this.discardButton = this.makeButton(1004, 674, 102, 30, "DISCARD", () => this.discardTechniques());
     this.newGameButton = this.makeButton(1120, 674, 124, 30, "NEW LEG", () => this.newGame());
+  }
+
+  private currentPubLocation() {
+    return pubLocations[this.pubLocationIndex];
+  }
+
+  private cyclePubLocation() {
+    if (this.isGuideOpen()) return;
+    this.pubLocationIndex = Phaser.Math.Wrap(this.pubLocationIndex + 1, 0, pubLocations.length);
+    this.pubBackground.setTexture(this.currentPubLocation().assetKey).setDisplaySize(1280, 720);
+    this.refresh();
   }
 
   private drawVisitDart(g: Phaser.GameObjects.Graphics, x: number, y: number, color: number, alpha: number) {
@@ -878,6 +894,7 @@ export class PubGameScene extends Phaser.Scene {
     this.cpuMetaText.setText("CPU");
     this.playerLegText.setText(`LEGS ${this.legsWon.player}   SETS 0`);
     this.cpuLegText.setText(`LEGS ${this.legsWon.cpu}  SETS 0`);
+    this.centerSignText.setText(`301\nBEST OF\n5 LEGS\n${this.currentPubLocation().signLabel}`);
     this.checkoutText.setText(`CHECKOUT\n${this.checkoutSuggestion(player.score)}`);
     this.visitText.setText(
       `VISIT\n${this.state.players[this.state.activePlayerId].dartsThrown + 1}/3`
